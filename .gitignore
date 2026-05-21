@@ -1,0 +1,17 @@
+node_modules
+dist
+dist2
+releases
+.vite
+vite.config.ts.timestamp-*.mjs
+
+# transient leftovers from the cross-platform sandbox setup; safe to delete from Windows
+.git-broken*
+.dist*-stale
+.vite.config.ts.timestamp-*.mjs.stale
+
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
