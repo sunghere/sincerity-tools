@@ -39,4 +39,28 @@ export interface ToolResult {
   bodyHtml?: string;
   /** Style the popover differently for errors. */
   status?: "ok" | "error";
+  /**
+   * Extra footer actions, rendered as buttons next to the copy button.
+   * Use for context-aware affordances — e.g. an "Open" button when the
+   * decoded result is a URL.
+   */
+  actions?: ToolAction[];
+}
+
+/**
+ * A footer button rendered in the popover.
+ *
+ * Keep `onClick` lightweight: it runs in the content-script context, so it can
+ * call `window.open`, write to `navigator.clipboard`, dispatch DOM events,
+ * etc., but it shouldn't await long-running work without giving feedback.
+ */
+export interface ToolAction {
+  /** Visible button text. */
+  label: string;
+  /** Optional inline SVG markup; rendered to the left of the label. */
+  iconSvg?: string;
+  /** Visual treatment. Defaults to "default" (subtle). */
+  variant?: "default" | "primary";
+  /** Click handler. */
+  onClick: () => void;
 }

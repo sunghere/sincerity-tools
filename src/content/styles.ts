@@ -136,27 +136,52 @@ export const STYLES = `
   }
   .popover-footer {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
     gap: 6px;
     padding: 6px 10px;
     background: #1a1a1d;
     border-top: 1px solid #2c2c33;
   }
-  .copy-btn {
+  .footer-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     background: transparent;
     color: #ccc;
     border: 1px solid #3a3a42;
     border-radius: 4px;
     padding: 3px 9px;
     font-size: 11px;
+    line-height: 1;
     cursor: pointer;
     transition: background 80ms ease, color 80ms ease, border-color 80ms ease;
   }
-  .copy-btn:hover {
+  .footer-btn:hover {
     background: #2c2c33;
     color: #ffffff;
   }
-  .copy-btn.copied {
+  .footer-btn.primary {
+    background: #4d9fff;
+    border-color: #4d9fff;
+    color: #061224;
+    font-weight: 600;
+  }
+  .footer-btn.primary:hover {
+    background: #6db0ff;
+    border-color: #6db0ff;
+    color: #061224;
+  }
+  .footer-btn-icon {
+    display: inline-flex;
+    align-items: center;
+  }
+  .footer-btn-icon svg {
+    width: 13px;
+    height: 13px;
+    display: block;
+  }
+  .footer-btn.copy-btn.copied {
     color: #7ad17a;
     border-color: #7ad17a;
   }

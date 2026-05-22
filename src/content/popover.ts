@@ -1,4 +1,4 @@
-import type { Tool, ToolResult } from "../types";
+import type { Tool, ToolAction, ToolResult } from "../types";
 import { ensureRoot } from "./root";
 import type { ToolbarAnchor } from "./toolbar";
 
@@ -50,32 +50,30 @@ export function showPopover(opts: ShowPopoverOpts): void {
   el.appendChild(header);
   el.appendChild(body);
 
-  // --- footer (copy button, only for successful results) ---
-  if (opts.result.status !== "error" && opts.result.body) {
+  // --- footer ---
+  // Shown when there's at least one button to render: tool-provided actions
+  // and/or the default copy button for successful results.
+  const showCopy = opts.result.status !== "error" && !!opts.result.body;
+  const actions = opts.result.actions ?? [];
+  if (showCopy || actions.length > 0) {
     const footer = document.createElement("div");
     footer.className = "popover-footer";
 
-    const copyBtn = document.createElement("button");
-    copyBtn.className = "copy-btn";
-    copyBtn.type = "button";
-    copyBtn.textContent = "복사";
-    copyBtn.addEventListener("mousedown", (e) => e.preventDefault());
-    copyBtn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      try {
-        await navigator.clipboard.writeText(opts.result.body);
-        copyBtn.classList.add("copied");
-        copyBtn.textContent = "복사됨";
-      } catch {
-        copyBtn.textContent = "복사 실패";
-      }
-      window.setTimeout(() => {
-        copyBtn.classList.remove("copied");
-        copyBtn.textContent = "복사";
-      }, 1200);
-    });
+    // Tool-provided actions first (left side), copy on the right.
+    for (const action of actions) {
+      footer.appendChild(buildActionButton(action));
+    }
 
-    footer.appendChild(copyBtn);
+    if (showCopy) {
+      // Spacer pushes the copy button to the right when actions exist on the left.
+      if (actions.length > 0) {
+        const spacer = document.createElement("span");
+        spacer.style.flex = "1";
+        footer.appendChild(spacer);
+      }
+      footer.appendChild(buildCopyButton(opts.result.body));
+    }
+
     el.appendChild(footer);
   }
 
@@ -106,4 +104,56 @@ export function hidePopover(): void {
 
 export function isPopoverOpen(): boolean {
   return current !== null;
+}
+
+// --------------------------- internals ---------------------------
+
+function buildActionButton(action: ToolAction): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "footer-btn" + (action.variant === "primary" ? " primary" : "");
+  if (action.iconSvg) {
+    const icon = document.createElement("span");
+    icon.className = "footer-btn-icon";
+    icon.innerHTML = action.iconSvg;
+    btn.appendChild(icon);
+  }
+  const label = document.createElement("span");
+  label.textContent = action.label;
+  btn.appendChild(label);
+  // preventDefault on mousedown so clicking the button never collapses any
+  // remaining page selection underneath the popover.
+  btn.addEventListener("mousedown", (e) => e.preventDefault());
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    try {
+      action.onClick();
+    } catch (err) {
+      console.error("[sincerity-tools] action failed:", err);
+    }
+  });
+  return btn;
+}
+
+function buildCopyButton(text: string): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "footer-btn copy-btn";
+  btn.textContent = "복사";
+  btn.addEventListener("mousedown", (e) => e.preventDefault());
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.classList.add("copied");
+      btn.textContent = "복사됨";
+    } catch {
+      btn.textContent = "복사 실패";
+    }
+    window.setTimeout(() => {
+      btn.classList.remove("copied");
+      btn.textContent = "복사";
+    }, 1200);
+  });
+  return btn;
 }

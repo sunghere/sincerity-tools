@@ -7,7 +7,8 @@ Inspired by Google Translate's selection popover and Slack's hover action bar.
 
 - **base64 decoder** — select text that looks like base64, click the icon in
   the toolbar that appears above your selection, see the decoded UTF-8 in a
-  popover.
+  popover. If the decoded result is an `http(s)://` URL, an **Open** button
+  appears in the popover footer to launch it in a new tab.
 
 The popover anchors to the *page* (not the viewport), so it scrolls with the
 content and may slide off-screen. It is dismissed only by:
@@ -41,18 +42,15 @@ Output goes to `dist/`. Load that folder the same way as above.
 
 ## Release
 
-One-shot version bump + build + zip + git tag:
-
 ```bash
 npm run release:patch   # 0.1.0 -> 0.1.1
 npm run release:minor   # 0.1.0 -> 0.2.0
 npm run release:major   # 0.1.0 -> 1.0.0
-# or pick an explicit version:
-node scripts/release.mjs 1.2.3
+node scripts/release.mjs 1.2.3   # explicit
 ```
 
-This writes a packaged zip to `releases/sincerity-tools-vX.Y.Z.zip`, creates a
-release commit and a `vX.Y.Z` tag, then prints the next step:
+Writes `releases/sincerity-tools-vX.Y.Z.zip`, makes a release commit and a
+`vX.Y.Z` tag. Then:
 
 ```bash
 git push --follow-tags
@@ -62,23 +60,29 @@ Flags: `--no-tag`, `--no-zip`, `--no-commit`.
 
 ## First-time GitHub setup
 
-After `gh auth login`:
-
 ```bash
-npm run github:init                # uses your gh user, repo name "sincerity-tools"
-# or:
-node scripts/github-init.mjs cisisn/sincerity-tools           # explicit owner/name
-node scripts/github-init.mjs --private                        # create as private
+gh auth status       # if not logged in: gh auth login
+npm run github:init
 ```
 
-Idempotent — re-running just pushes any local commits/tags that aren't on the
-remote yet.
+Default: public repo named `sincerity-tools` under your gh user. Override with
+`node scripts/github-init.mjs cisisn/some-name` or add `--private`. The script
+cleans transient sandbox leftovers, repairs/initializes `.git`, makes the
+first commit, creates the repo on GitHub, and pushes — idempotent on re-runs.
+
+## GitHub Pages
+
+After the first push, enable Pages at
+`https://github.com/<you>/<repo>/settings/pages`, choose **main** + **/docs**.
+The onboarding page lives at `docs/index.html` and is plain HTML+CSS.
 
 ## Adding a tool
 
 1. Create `src/tools/<your-tool>/index.ts` exporting a `Tool` (see `src/types.ts`).
 2. Register it in `src/tools/registry.ts`.
 3. The toolbar auto-renders your icon for any selection where `canHandle` returns true.
+4. To attach a context button (like the URL-open button), return `actions` on
+   the `ToolResult`.
 
 ## Layout
 
@@ -95,9 +99,12 @@ src/
     base64-decoder/
       index.ts    # Tool definition
       decode.ts   # base64 detection + UTF-8-safe decode
-  types.ts        # Tool interface
+  types.ts        # Tool / ToolResult / ToolAction interfaces
 
 scripts/
   release.mjs     # version bump + build + zip + git tag
-  github-init.mjs # one-shot gh-based repo bootstrap
+  github-init.mjs # one-shot gh-based repo bootstrap (cleans sandbox leftovers)
+
+docs/
+  index.html      # GitHub Pages onboarding (dark Slack tone)
 ```
