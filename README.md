@@ -66,7 +66,7 @@ npm run github:init
 ```
 
 Default: public repo named `sincerity-tools` under your gh user. Override with
-`node scripts/github-init.mjs cisisn/some-name` or add `--private`. The script
+`node scripts/github-init.mjs sunghere/some-name` or add `--private`. The script
 cleans transient sandbox leftovers, repairs/initializes `.git`, makes the
 first commit, creates the repo on GitHub, and pushes — idempotent on re-runs.
 
