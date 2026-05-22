@@ -5,20 +5,25 @@ export default defineManifest({
   manifest_version: 3,
   name: "Sincerity Tools",
   version: pkg.version,
-  description: "Selection-driven developer tools (base64 decoder, ...).",
-  // No host permissions needed for the v0.1 surface — purely content-script DOM work.
-  permissions: [],
+  description: "Selection-driven developer tools (base64 encode/decode, ...).",
+  permissions: ["contextMenus"],
   action: {
     default_title: "Sincerity Tools"
   },
+  background: {
+    service_worker: "src/background/index.ts",
+    type: "module"
+  },
   content_scripts: [
     {
-      // <all_urls> covers http, https, and file://; the latter needs the user to enable
-      // "Allow access to file URLs" on the extension's details page.
       matches: ["<all_urls>"],
       js: ["src/content/index.ts"],
       run_at: "document_idle",
-      all_frames: false
+      // Many sites (community boards, embedded editors, Notion-style content)
+      // render the body inside iframes. With all_frames:false we'd never see
+      // mouseup/selection events in those frames. Inject into every frame so
+      // the toolbar shows up wherever the user selects text.
+      all_frames: true
     }
   ],
   icons: {

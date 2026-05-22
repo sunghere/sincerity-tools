@@ -1,17 +1,50 @@
+# --- node / build artifacts ---
 node_modules
 dist
-dist2
+dist*
 releases
 .vite
 vite.config.ts.timestamp-*.mjs
 
-# transient leftovers from the cross-platform sandbox setup; safe to delete from Windows
+# --- transient sandbox leftovers (safe to delete from Windows) ---
 .git-broken*
 .dist*-stale
 .vite.config.ts.timestamp-*.mjs.stale
+.release-notes.tmp
 
+# --- editor / IDE ---
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.history/
+.cursor/
+
+# --- OS junk ---
 .DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+# --- logs ---
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- env / secrets ---
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+
+# --- coverage / test caches ---
+coverage/
+.nyc_output/
+*.tsbuildinfo
+
+# --- chrome web store automation ---
+.chrome-webstore-token

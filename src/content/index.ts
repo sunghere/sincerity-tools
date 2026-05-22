@@ -117,3 +117,35 @@ function onKeyDown(e: KeyboardEvent): void {
     hidePopover();
   }
 }
+
+// --- right-click context menu integration ---
+// The background script (service worker) registers a "Sincerity Tools" menu
+// with one child per tool. When the user picks one, it sends us this message.
+// We resolve the tool, derive an anchor from the current selection (falling
+// back to a fixed viewport position if the selection has been cleared by the
+// time the menu closes), and reuse the same runTool() path as a toolbar click.
+chrome.runtime?.onMessage?.addListener((msg) => {
+  if (!msg || msg.type !== "sincerity:run-tool") return;
+  const tool = allTools.find((t) => t.id === msg.toolId);
+  if (!tool) return;
+  const text = (msg.text as string | undefined) || window.getSelection()?.toString() || "";
+  if (!text) return;
+
+  let anchor: ToolbarAnchor | null = null;
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
+    anchor = anchorFromSelection(sel);
+  }
+  if (!anchor) {
+    // Selection is gone (Chrome usually keeps it, but be safe). Anchor near
+    // the top center of the current viewport so the popover is visible.
+    anchor = {
+      pageX: window.scrollX + window.innerWidth / 2,
+      pageY: window.scrollY + 80,
+      pageBottom: window.scrollY + 120,
+    };
+  }
+  ensureRoot();
+  void runTool(tool, text, anchor);
+});
+

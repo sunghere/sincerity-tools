@@ -189,6 +189,105 @@ export const STYLES = `
     height: 13px;
     display: block;
   }
+  /* --- URL QR tool --- */
+  .qr-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0 2px;
+  }
+  .qr-frame {
+    background: #0d0d10;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #2c2c33;
+    line-height: 0;
+  }
+  .qr-frame svg {
+    display: block;
+    width: 200px;
+    height: 200px;
+  }
+  .qr-caption {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+      'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+    font-size: 11px;
+    color: #8a8a93;
+  }
+
+  /* --- URL Inspector --- */
+  .url-inspect {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+      'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+    font-size: 12.5px;
+  }
+  .url-warn {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: -2px 0 8px;
+    padding: 8px 10px;
+    background: rgba(240, 200, 96, 0.08);
+    border: 1px solid rgba(240, 200, 96, 0.3);
+    border-radius: 5px;
+    color: #f0c860;
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+  .url-warn-row + .url-warn-row { margin-top: 2px; }
+  .url-row {
+    display: flex;
+    gap: 8px;
+    line-height: 1.5;
+  }
+  .url-label {
+    flex: 0 0 60px;
+    color: #8a8a93;
+    font-size: 11.5px;
+  }
+  .url-val {
+    flex: 1;
+    color: #e8e8ec;
+    word-break: break-all;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+  .url-section-label {
+    color: #8a8a93;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 6px 0 2px;
+  }
+  .url-params {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-left: 8px;
+    border-left: 2px solid #2c2c33;
+  }
+  .url-param {
+    display: flex;
+    gap: 8px;
+    font-size: 12px;
+  }
+  .url-param-key {
+    flex: 0 0 100px;
+    color: #b9d6ff;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    word-break: break-all;
+  }
+  .url-param-val {
+    flex: 1;
+    color: #e8e8ec;
+    word-break: break-all;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
   .footer-btn.copy-btn.copied {
     color: #7ad17a;
     border-color: #7ad17a;
