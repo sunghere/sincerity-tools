@@ -104,7 +104,7 @@ if (!repoExists) {
 }
 
 console.log(`\nDone. Repo: https://github.com/${slug}`);
-console.log(`Pages: enable at https://github.com/${slug}/settings/pages  (Source: main, Folder: /docs)`);
+console.log(`Pages: https://${owner}.github.io/${name}/`);
 
 // ------------------- helpers -------------------
 
