@@ -68,6 +68,27 @@ const pkgPath = resolve(root, "package.json");
 const pkg = readJson(pkgPath);
 const oldVersion = pkg.version;
 const newVersion = bumpVersion(oldVersion, bumpArg);
+
+// Pre-flight: if a tag for the target version already exists (leftover from a
+// previous failed run), bail early with rescue instructions instead of
+// crashing mid-release after we've already bumped + built + committed.
+if (!flags.has("--no-tag")) {
+  const tagExists = spawnSync("git", ["rev-parse", "-q", "--verify", `refs/tags/v${newVersion}`], {
+    cwd: root,
+    stdio: "ignore",
+  }).status === 0;
+  if (tagExists) {
+    console.error(`error: tag v${newVersion} already exists (leftover from a failed run).`);
+    console.error(`Rescue:`);
+    console.error(`  git tag -d v${newVersion}`);
+    console.error(`  git push --delete origin v${newVersion}   # if it was pushed`);
+    console.error(`  npm run release:patch                     # then retry`);
+    console.error(`Alternatively, pick an explicit higher version:`);
+    console.error(`  node scripts/release.mjs ${bumpVersion(newVersion, "patch")}`);
+    process.exit(1);
+  }
+}
+
 pkg.version = newVersion;
 writeJson(pkgPath, pkg);
 console.log(`version: ${oldVersion} -> ${newVersion}`);
