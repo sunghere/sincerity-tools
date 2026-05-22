@@ -43,15 +43,19 @@ function writeJson(file, obj) { writeFileSync(file, JSON.stringify(obj, null, 2)
 function capture(cmd) { return execSync(cmd, { cwd: root, encoding: "utf-8" }).trim(); }
 function has(bin) { return spawnSync(bin, ["--version"], { stdio: "ignore" }).status === 0; }
 
-// --- 1. clean working tree check (skip if both git steps disabled) ---
+// --- 1. handle pending changes ---
+// If the working tree is dirty, auto-stage and commit BEFORE the version bump
+// so the release commit only contains the version bump. This is the friendlier
+// default — previously this errored out and forced a manual commit step.
 const skipGit = flags.has("--no-commit") && flags.has("--no-tag");
 if (!skipGit) {
   try {
     const status = capture("git status --porcelain");
     if (status && !flags.has("--no-commit")) {
-      console.error("Working tree is not clean. Commit or stash changes first, or pass --no-commit.");
-      console.error(status);
-      process.exit(1);
+      console.log("uncommitted changes detected; auto-committing before release:");
+      console.log(status.split("\n").map((l) => "  " + l).join("\n"));
+      run("git add -A");
+      run('git commit -m "chore: pre-release sync"');
     }
   } catch {
     console.error("Not a git repo. Re-run with --no-commit --no-tag --no-push.");
