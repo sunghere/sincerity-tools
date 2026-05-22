@@ -60,6 +60,14 @@ export const STYLES = `
     outline: 2px solid #4d9fff;
     outline-offset: 1px;
   }
+  /* Dimmed = tool's canHandle() returned false for the current selection.
+     The button stays clickable so the user can override the heuristic. */
+  .toolbar-btn.dimmed {
+    opacity: 0.38;
+  }
+  .toolbar-btn.dimmed:hover {
+    opacity: 1;
+  }
   .toolbar-btn svg {
     width: 16px;
     height: 16px;

@@ -3,21 +3,22 @@
  *
  * Flow:
  *   1. User finishes a text selection (mouseup with non-collapsed selection).
- *   2. We ask the tool registry which tools apply to the selected text.
- *   3. If any apply, render a Slack-style icon toolbar above the selection.
- *   4. Clicking an icon runs that tool and replaces the toolbar with a popover.
+ *   2. We render a Slack-style icon toolbar above the selection with ALL tools.
+ *      Each tool's `canHandle()` is a *hint*, not a filter — tools that don't
+ *      match the selection still appear, but are visually dimmed.
+ *   3. Clicking an icon runs that tool and replaces the toolbar with a popover.
+ *      If the tool can't handle the selection, it surfaces its own error popover.
  *
  * Dismissal:
- *   - Toolbar: hides on next selection (whether or not a tool applies),
- *     or on ESC.
+ *   - Toolbar: hides on next selection or on ESC.
  *   - Popover: stays open through outside clicks and scroll. Closes only on
  *     ESC or on the next non-empty selection.
  */
-import { findApplicableTools } from "../tools/registry";
+import { tools as allTools } from "../tools/registry";
 import type { Tool } from "../types";
 import { ensureRoot, isInsideOurUI } from "./root";
 import { hidePopover, showPopover } from "./popover";
-import { hideToolbar, showToolbar, type ToolbarAnchor } from "./toolbar";
+import { hideToolbar, showToolbar, type ToolbarAnchor, type ToolbarEntry } from "./toolbar";
 
 // Wire listeners once.
 document.addEventListener("mouseup", onMouseUp, true);
@@ -49,18 +50,36 @@ function handleSelection(): void {
   hidePopover();
   hideToolbar();
 
-  const applicable = findApplicableTools(text);
-  if (applicable.length === 0) return;
+  if (allTools.length === 0) return;
 
   ensureRoot();
   const anchor = anchorFromSelection(sel);
   if (!anchor) return;
 
+  // Show every registered tool. canHandle() decides which are "matched"
+  // (full opacity / not dimmed); mismatched tools are still clickable.
+  const entries: ToolbarEntry[] = allTools.map((tool) => ({
+    tool,
+    applicable: safeCanHandle(tool, text),
+  }));
+
+  // Sort: applicable tools first, then non-applicable. Keeps the most likely
+  // pick under the cursor for fast access.
+  entries.sort((a, b) => Number(b.applicable) - Number(a.applicable));
+
   showToolbar({
-    tools: applicable,
+    entries,
     anchor,
     onPick: (tool) => void runTool(tool, text, anchor),
   });
+}
+
+function safeCanHandle(tool: Tool, text: string): boolean {
+  try {
+    return tool.canHandle(text);
+  } catch {
+    return false;
+  }
 }
 
 async function runTool(tool: Tool, text: string, anchor: ToolbarAnchor): Promise<void> {

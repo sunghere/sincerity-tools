@@ -10,8 +10,26 @@ export interface ToolbarAnchor {
   pageBottom: number;
 }
 
+/**
+ * One slot in the toolbar.
+ *
+ * `applicable` is the result of the tool's `canHandle()` — a *hint* about
+ * whether this tool makes sense for the current selection. We render it as
+ * a visual dim, NOT as a hard filter, because:
+ *
+ *   - A tool like "base64 encode" works on plain text, not on base64.
+ *   - A tool like "base64 decode" works on base64, not on plain text.
+ *
+ * Filtering would hide one of them depending on what's selected. Dimming
+ * keeps both discoverable while still hinting which one is the likely pick.
+ */
+export interface ToolbarEntry {
+  tool: Tool;
+  applicable: boolean;
+}
+
 export interface ShowToolbarOpts {
-  tools: Tool[];
+  entries: ToolbarEntry[];
   anchor: ToolbarAnchor;
   onPick: (tool: Tool) => void;
 }
@@ -25,12 +43,11 @@ export function showToolbar(opts: ShowToolbarOpts): void {
   const el = document.createElement("div");
   el.className = "toolbar";
   el.setAttribute("role", "toolbar");
-  // Re-enable pointer events; the host element disables them so the page is interactive.
   el.style.pointerEvents = "auto";
 
-  for (const tool of opts.tools) {
+  for (const { tool, applicable } of opts.entries) {
     const btn = document.createElement("button");
-    btn.className = "toolbar-btn";
+    btn.className = "toolbar-btn" + (applicable ? "" : " dimmed");
     btn.type = "button";
     btn.dataset.toolId = tool.id;
     btn.setAttribute("aria-label", tool.name);
@@ -38,12 +55,10 @@ export function showToolbar(opts: ShowToolbarOpts): void {
 
     const tip = document.createElement("span");
     tip.className = "tooltip";
-    tip.textContent = tool.name;
+    // Show a hint in the tooltip when the tool doesn't natively apply.
+    tip.textContent = applicable ? tool.name : `${tool.name} (적용 안 됨)`;
     btn.appendChild(tip);
 
-    // preventDefault on mousedown so clicking the button doesn't collapse the
-    // page selection — we don't strictly need it after the toolbar opens, but
-    // it prevents jitter if the user mis-clicks twice.
     btn.addEventListener("mousedown", (e) => e.preventDefault());
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -52,7 +67,7 @@ export function showToolbar(opts: ShowToolbarOpts): void {
     el.appendChild(btn);
   }
 
-  // Measure off-screen, then place. Avoids a one-frame flash at (0, 0).
+  // Measure off-screen, then place.
   el.style.visibility = "hidden";
   el.style.top = "0px";
   el.style.left = "0px";
@@ -62,7 +77,6 @@ export function showToolbar(opts: ShowToolbarOpts): void {
   const margin = 8;
   const idealTop = opts.anchor.pageY - height - margin;
   const minTop = window.scrollY + margin;
-  // If too close to the top of the viewport, flip below the selection.
   const top = idealTop < minTop ? opts.anchor.pageBottom + margin : idealTop;
   const left = Math.max(margin, opts.anchor.pageX - width / 2);
 

@@ -122,7 +122,12 @@ if (!flags.has("--no-push")) {
     } finally {
       try { rmSync(notesFile); } catch {}
     }
-    console.log(`released: https://github.com/$(gh repo view --json nameWithOwner --jq .nameWithOwner)/releases/tag/v${newVersion}`);
+    try {
+      const repoSlug = capture("gh repo view --json nameWithOwner --jq .nameWithOwner");
+      console.log(`released: https://github.com/${repoSlug}/releases/tag/v${newVersion}`);
+    } catch {
+      console.log(`released: v${newVersion}`);
+    }
   } else {
     console.log("gh not authenticated — skipping GitHub Release. Create it manually:");
     if (zipPath) {
