@@ -17,11 +17,37 @@
 import { ensureRoot } from "../../content/root";
 import type { Finding } from "./scanner";
 
+/**
+ * Overlay lives inside the shadow root that's already created by
+ * src/content/root.ts. We share the host across the selection toolbar /
+ * popover and this overlay.
+ *
+ * Multi-frame behavior:
+ *   - Every frame (top and child) renders its own outlined boxes for findings
+ *     in *its* document. Cross-frame element references aren't transferable,
+ *     so each frame draws what it owns.
+ *   - Only the top frame builds the interactive toast (count + ←/→/ESC).
+ *     Child-frame toasts on ad-heavy pages would be chaotic and most ad
+ *     iframes are too small to fit one anyway. Users who want to navigate
+ *     findings inside a specific iframe can right-click in that iframe — the
+ *     scan runs there and then forwards to its own descendants only.
+ */
+const IS_TOP_FRAME = (() => {
+  try {
+    return window.top === window;
+  } catch {
+    // Cross-origin access can throw when reaching for window.top. If we
+    // can't tell, assume we're not the top frame and stay quiet.
+    return false;
+  }
+})();
+
 interface OverlayState {
   findings: Finding[];
+  truncated: boolean;
   layer: HTMLDivElement;
   activeRing: HTMLDivElement;
-  toast: HTMLDivElement;
+  toast: HTMLDivElement | null;
   boxes: HTMLDivElement[];
   activeIdx: number;
   cleanup: () => void;
@@ -29,14 +55,25 @@ interface OverlayState {
 
 let current: OverlayState | null = null;
 
-export function showOverlay(findings: Finding[]): void {
+export interface ShowOverlayOpts {
+  findings: Finding[];
+  truncated?: boolean;
+}
+
+export function showOverlay(opts: ShowOverlayOpts): void {
+  const { findings, truncated = false } = opts;
   hideOverlay();
 
   const root = ensureRoot();
   ensureScanStyles(root);
 
   if (findings.length === 0) {
-    showEphemeralToast(root, "히든 텍스트 의심 없음", "이 페이지에서는 임계점을 넘는 항목을 찾지 못했어요.");
+    // Don't show the "no findings" toast in child frames — only the top frame
+    // is the user's focus, and child-frame popovers about empty scans would
+    // be noise.
+    if (IS_TOP_FRAME) {
+      showEphemeralToast(root, "히든 텍스트 의심 없음", "이 페이지에서는 임계점을 넘는 항목을 찾지 못했어요.");
+    }
     return;
   }
 
@@ -62,14 +99,15 @@ export function showOverlay(findings: Finding[]): void {
   activeRing.className = "scan-active-ring";
   activeRing.style.display = "none";
 
-  const toast = buildToast(findings.length);
+  const toast = IS_TOP_FRAME ? buildToast(findings.length, truncated) : null;
 
   root.appendChild(layer);
   root.appendChild(activeRing);
-  root.appendChild(toast);
+  if (toast) root.appendChild(toast);
 
   const state: OverlayState = {
     findings,
+    truncated,
     layer,
     activeRing,
     toast,
@@ -86,6 +124,8 @@ export function showOverlay(findings: Finding[]): void {
       hideOverlay();
       return;
     }
+    // Arrow-key navigation only makes sense where the toast is present.
+    if (!IS_TOP_FRAME) return;
     if (e.key === "ArrowRight" || e.key === "ArrowDown") {
       e.preventDefault();
       jump(1);
@@ -110,24 +150,26 @@ export function showOverlay(findings: Finding[]): void {
     window.removeEventListener("resize", onScrollOrResize);
   };
 
-  // Wire toast buttons.
-  toast.querySelector<HTMLButtonElement>(".scan-prev")?.addEventListener("click", () => jump(-1));
-  toast.querySelector<HTMLButtonElement>(".scan-next")?.addEventListener("click", () => jump(1));
-  toast.querySelector<HTMLButtonElement>(".scan-close")?.addEventListener("click", () => hideOverlay());
-  toast.querySelector<HTMLButtonElement>(".scan-copy")?.addEventListener("click", () => {
-    if (!current) return;
-    const f = current.findings[current.activeIdx];
-    if (!f) return;
-    void navigator.clipboard.writeText(f.fullText).then(() => {
-      const btn = toast.querySelector<HTMLButtonElement>(".scan-copy");
-      if (!btn) return;
-      const prev = btn.textContent;
-      btn.textContent = "복사됨";
-      window.setTimeout(() => {
-        btn.textContent = prev ?? "복사";
-      }, 1200);
+  // Wire toast buttons — only present in the top frame.
+  if (toast) {
+    toast.querySelector<HTMLButtonElement>(".scan-prev")?.addEventListener("click", () => jump(-1));
+    toast.querySelector<HTMLButtonElement>(".scan-next")?.addEventListener("click", () => jump(1));
+    toast.querySelector<HTMLButtonElement>(".scan-close")?.addEventListener("click", () => hideOverlay());
+    toast.querySelector<HTMLButtonElement>(".scan-copy")?.addEventListener("click", () => {
+      if (!current) return;
+      const f = current.findings[current.activeIdx];
+      if (!f) return;
+      void navigator.clipboard.writeText(f.fullText).then(() => {
+        const btn = toast.querySelector<HTMLButtonElement>(".scan-copy");
+        if (!btn) return;
+        const prev = btn.textContent;
+        btn.textContent = "복사됨";
+        window.setTimeout(() => {
+          btn.textContent = prev ?? "복사";
+        }, 1200);
+      });
     });
-  });
+  }
 
   jump(1, /* fromInit */ true);
 }
@@ -137,7 +179,7 @@ export function hideOverlay(): void {
   current.cleanup();
   current.layer.remove();
   current.activeRing.remove();
-  current.toast.remove();
+  current.toast?.remove();
   current = null;
 }
 
@@ -192,14 +234,18 @@ function repositionActive(): void {
   ring.style.height = `${r.height + 6}px`;
 }
 
-function buildToast(total: number): HTMLDivElement {
+function buildToast(total: number, truncated: boolean): HTMLDivElement {
   const t = document.createElement("div");
   t.className = "scan-toast";
+  const truncBadge = truncated
+    ? `<span class="scan-trunc" title="스캔 범위 한도(MAX_TEXT_NODES)에 도달해 일부 노드를 건너뛰었어요.">일부 생략</span>`
+    : "";
   t.innerHTML = `
     <div class="scan-toast-head">
       <div class="scan-title">
         <span class="scan-dot"></span>
         히든 텍스트 <strong class="scan-total">${total}</strong>개 의심
+        ${truncBadge}
       </div>
       <button class="scan-close" type="button" aria-label="닫기">×</button>
     </div>
@@ -223,7 +269,7 @@ function buildToast(total: number): HTMLDivElement {
 }
 
 function fillToastDetail(f: Finding, idx: number): void {
-  if (!current) return;
+  if (!current || !current.toast) return;
   const t = current.toast;
   setText(t, ".scan-cur", String(idx + 1));
   setText(t, ".scan-score-pill", `score ${f.score}`);
@@ -328,7 +374,8 @@ const SCAN_STYLES = `
     border-radius: 3px;
     pointer-events: none;
     z-index: 2147483646;
-    transition: top 80ms ease, left 80ms ease, width 80ms ease, height 80ms ease;
+    /* Intentionally no transition: scroll-driven repositioning would restart
+       the animation every frame and the ring would visibly lag the target. */
   }
 
   .scan-toast {
@@ -359,6 +406,17 @@ const SCAN_STYLES = `
   }
   .scan-title { display: inline-flex; align-items: center; gap: 8px; }
   .scan-total { color: #facc15; font-weight: 700; }
+  .scan-trunc {
+    font-size: 9.5px;
+    font-weight: 600;
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.12);
+    border: 1px solid rgba(251, 191, 36, 0.32);
+    border-radius: 3px;
+    padding: 1px 5px;
+    letter-spacing: 0.4px;
+    cursor: help;
+  }
   .scan-dot {
     width: 8px;
     height: 8px;

@@ -163,12 +163,60 @@ function onKeyDown(e: KeyboardEvent): void {
 // --- page scans ---
 // Triggered from the popup button or the page-context menu item. The runner
 // owns its own overlay; we just dispatch by id.
+//
+// Multi-frame routing: `chrome.tabs.sendMessage` from the popup / background
+// only reaches *one* frame (top by default, or info.frameId for right-click).
+// To scan iframes too, the receiving frame forwards the request to each of
+// its direct children via window.postMessage. Children that are themselves
+// our content scripts pick it up via the message listener below and cascade
+// the forward to *their* children — this naturally covers arbitrarily deep
+// frame trees and works across origins (postMessage to a different-origin
+// frame is allowed; only the *receiving* side decides whether to honor it,
+// which it does only when the message carries our runtime id).
 function runScan(scanId: string): void {
   ensureRoot();
   if (scanId === HIDDEN_TEXT_SCAN_ID) {
     runHiddenTextScan();
   }
+  forwardScanToChildFrames(scanId);
 }
+
+interface ForwardedScanMessage {
+  __sincerityTools: string; // chrome.runtime.id — authenticates the message
+  type: "sincerity:run-scan";
+  scanId: string;
+}
+
+function forwardScanToChildFrames(scanId: string): void {
+  const runtimeId = chrome.runtime?.id;
+  if (!runtimeId) return;
+  const msg: ForwardedScanMessage = {
+    __sincerityTools: runtimeId,
+    type: "sincerity:run-scan",
+    scanId,
+  };
+  // window.frames length and frame access are safe for direct children even
+  // across origins (we can postMessage to them); enumerating descendants
+  // ourselves would throw on cross-origin access, so we let each child cascade.
+  for (let i = 0; i < window.frames.length; i++) {
+    try {
+      window.frames[i].postMessage(msg, "*");
+    } catch {
+      // Some sandbox configurations reject postMessage; ignore.
+    }
+  }
+}
+
+window.addEventListener("message", (e) => {
+  const data = e.data as Partial<ForwardedScanMessage> | null | undefined;
+  if (!data || typeof data !== "object") return;
+  // Verify the message came from our own extension (runtime ids are unique
+  // per installation). Anything claiming our shape without the right id is
+  // either a typo collision or a malicious page — drop it.
+  if (data.__sincerityTools !== chrome.runtime?.id) return;
+  if (data.type !== "sincerity:run-scan" || typeof data.scanId !== "string") return;
+  runScan(data.scanId);
+});
 
 // --- right-click context menu integration ---
 // The background script (service worker) registers a "Sincerity Tools" menu

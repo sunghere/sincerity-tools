@@ -7,8 +7,8 @@ import { scanHiddenText } from "./scanner";
 import { showOverlay, hideOverlay } from "./overlay";
 
 export function runHiddenTextScan(): void {
-  const findings = scanHiddenText(document);
-  showOverlay(findings);
+  const { findings, truncated } = scanHiddenText(document);
+  showOverlay({ findings, truncated });
 }
 
 export { hideOverlay };
