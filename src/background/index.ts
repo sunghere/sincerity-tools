@@ -3,27 +3,30 @@
  *
  * Registers the right-click context menu hierarchy:
  *
- *   Sincerity Tools  (parent, shows only when text is selected)
- *     ├─ base64 인코드
- *     ├─ base64 디코드
- *     └─ ...
+ *   Sincerity Tools  (parent, visible on selection or on plain page click)
+ *     ├─ base64 인코드         (selection-only)
+ *     ├─ base64 디코드         (selection-only)
+ *     ├─ ...                   (selection-only)
+ *     └─ 히든 텍스트 찾기      (page-only, no selection required)
  *
- * When a child item is clicked, we forward the selection text + chosen tool
- * id to the content script via chrome.tabs.sendMessage. The content script
- * then runs the tool and renders the popover — same code path as the
- * hover-toolbar click.
+ * Selection-driven children forward the selection text + chosen tool id to
+ * the content script. The page-scan child sends a different message that
+ * triggers a full-page scan (no selection involved).
  */
 import { tools } from "../tools/registry";
 
 const PARENT_ID = "sincerity-tools-root";
 const ITEM_PREFIX = "sincerity:tool:";
+const SCAN_HIDDEN_TEXT_ID = "sincerity:scan:hidden-text-finder";
 
 function buildMenu(): void {
   chrome.contextMenus.removeAll(() => {
+    // Parent appears whenever either a selection-driven child or the page
+    // scan would apply — i.e. on either a selection or a plain page click.
     chrome.contextMenus.create({
       id: PARENT_ID,
       title: "Sincerity Tools",
-      contexts: ["selection"],
+      contexts: ["selection", "page"],
     });
     for (const tool of tools) {
       chrome.contextMenus.create({
@@ -33,6 +36,13 @@ function buildMenu(): void {
         contexts: ["selection"],
       });
     }
+    // Page scan child — visible without a selection.
+    chrome.contextMenus.create({
+      id: SCAN_HIDDEN_TEXT_ID,
+      parentId: PARENT_ID,
+      title: "히든 텍스트 찾기",
+      contexts: ["page"],
+    });
   });
 }
 
@@ -46,6 +56,18 @@ buildMenu();
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (!tab?.id) return;
   const id = String(info.menuItemId);
+
+  // Page scans first — they don't carry selection text.
+  if (id === SCAN_HIDDEN_TEXT_ID) {
+    const message = { type: "sincerity:run-scan", scanId: "hidden-text-finder" };
+    if (info.frameId !== undefined) {
+      chrome.tabs.sendMessage(tab.id, message, { frameId: info.frameId });
+    } else {
+      chrome.tabs.sendMessage(tab.id, message);
+    }
+    return;
+  }
+
   if (!id.startsWith(ITEM_PREFIX)) return;
   const toolId = id.slice(ITEM_PREFIX.length);
   // Right-click happens *inside* the frame where the selection lives, which
