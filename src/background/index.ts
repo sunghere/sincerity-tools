@@ -58,13 +58,16 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   const id = String(info.menuItemId);
 
   // Page scans first — they don't carry selection text.
+  //
+  // Always route to the top frame (no frameId): the content script there
+  // runs its own scan AND forwards to descendants via postMessage. Targeting
+  // info.frameId would scan only the right-clicked frame and miss its
+  // siblings, which is the wrong intent for a "scan this page" action.
   if (id === SCAN_HIDDEN_TEXT_ID) {
-    const message = { type: "sincerity:run-scan", scanId: "hidden-text-finder" };
-    if (info.frameId !== undefined) {
-      chrome.tabs.sendMessage(tab.id, message, { frameId: info.frameId });
-    } else {
-      chrome.tabs.sendMessage(tab.id, message);
-    }
+    chrome.tabs.sendMessage(tab.id, {
+      type: "sincerity:run-scan",
+      scanId: "hidden-text-finder",
+    });
     return;
   }
 

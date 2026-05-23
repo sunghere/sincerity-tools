@@ -66,19 +66,44 @@ interface Color {
   a: number;
 }
 
-// Returns all findings, sorted by score desc.
-export function scanHiddenText(rootEl: Document | ShadowRoot = document): Finding[] {
+export interface ScanResult {
+  findings: Finding[];
+  /** True when the scan hit MAX_TEXT_NODES and stopped early. */
+  truncated: boolean;
+}
+
+/**
+ * Per-scan memoization stores. Background and effective-opacity walks
+ * naturally visit every ancestor of every text node — without memoization
+ * that's O(N·D²) in the worst case. With these stores it collapses to O(N+D)
+ * because each ancestor is computed once and recursive calls hit the cache.
+ *
+ * `WeakMap` keyed by Element gets garbage-collected automatically when the
+ * scan finishes and we drop our local references.
+ */
+interface ScanContext {
+  opacity: WeakMap<Element, number>;
+  background: WeakMap<Element, Color>;
+}
+
+// Returns findings sorted by score desc, plus a truncation flag so the UI
+// can show "scan was capped" when a pathologically large DOM hit the budget.
+export function scanHiddenText(rootEl: Document | ShadowRoot = document): ScanResult {
   const findings: Finding[] = [];
   const budget = { count: 0 };
   let nextId = 1;
   const seen = new WeakSet<Element>();
+  const ctx: ScanContext = {
+    opacity: new WeakMap(),
+    background: new WeakMap(),
+  };
 
   walkTextNodes(rootEl, (textNode) => {
     const parent = textNode.parentElement;
     if (!parent || seen.has(parent)) return;
     seen.add(parent);
 
-    const finding = inspect(parent, textNode, nextId);
+    const finding = inspect(parent, textNode, nextId, ctx);
     if (finding) {
       nextId++;
       findings.push(finding);
@@ -86,7 +111,7 @@ export function scanHiddenText(rootEl: Document | ShadowRoot = document): Findin
   }, budget);
 
   findings.sort((a, b) => b.score - a.score);
-  return findings;
+  return { findings, truncated: budget.count >= MAX_TEXT_NODES };
 }
 
 function walkTextNodes(
@@ -100,6 +125,10 @@ function walkTextNodes(
     if (SKIP_TAGS.has(root.tagName)) return;
     // Skip our own UI's shadow root, recognized by host id.
     if (root.id === "__sincerity_tools_host__") return;
+    // `element.shadowRoot` is null for *closed* shadow roots — those are
+    // unreachable from a content script. The popular community frameworks we
+    // care about (kone.gg, Notion-style editors) all use open roots, so this
+    // path covers them.
     if (root.shadowRoot) walkTextNodes(root.shadowRoot, visit, budget);
   }
 
@@ -115,7 +144,7 @@ function walkTextNodes(
   }
 }
 
-function inspect(parent: Element, textNode: Text, id: number): Finding | null {
+function inspect(parent: Element, textNode: Text, id: number, ctx: ScanContext): Finding | null {
   const trimmed = (textNode.textContent ?? "").trim();
   if (trimmed.length < 2) return null;
 
@@ -138,7 +167,7 @@ function inspect(parent: Element, textNode: Text, id: number): Finding | null {
   }
 
   // 2. effective opacity (composed up the ancestor chain)
-  const effOpacity = effectiveOpacity(parent);
+  const effOpacity = effectiveOpacity(parent, ctx.opacity);
   if (effOpacity < 0.05) {
     reasons.push({ code: "opacity", detail: `effective ${effOpacity.toFixed(3)}`, weight: 40 });
   } else if (effOpacity < 0.2) {
@@ -203,7 +232,7 @@ function inspect(parent: Element, textNode: Text, id: number): Finding | null {
   let contrast: number | null = null;
   let bgStr: string | null = null;
   if (fg && fg.a >= 0.5) {
-    const bg = effectiveBackground(parent);
+    const bg = effectiveBackground(parent, ctx.background);
     if (bg) {
       bgStr = formatColor(bg);
       contrast = wcagContrast(fg, bg);
@@ -284,38 +313,58 @@ function clampByte(x: number): number {
   return Math.max(0, Math.min(255, Math.round(x)));
 }
 
-function effectiveOpacity(el: Element): number {
-  let cur: Element | null = el;
-  let o = 1;
-  while (cur) {
-    const cs = window.getComputedStyle(cur);
-    const v = parseFloat(cs.opacity);
-    if (Number.isFinite(v)) o *= v;
-    cur = cur.parentElement;
-  }
-  return o;
+/**
+ * Effective opacity is the product of `opacity` up the ancestor chain. We
+ * memoize so the chain for any element is computed exactly once per scan —
+ * `effectiveOpacity(parent) === own_opacity * effectiveOpacity(grandparent)`
+ * means each ancestor's contribution is reused by every descendant.
+ */
+function effectiveOpacity(el: Element, memo: WeakMap<Element, number>): number {
+  const cached = memo.get(el);
+  if (cached !== undefined) return cached;
+
+  const cs = window.getComputedStyle(el);
+  const own = parseFloat(cs.opacity);
+  const ownClamped = Number.isFinite(own) ? own : 1;
+  const parent = el.parentElement;
+  const result = parent ? ownClamped * effectiveOpacity(parent, memo) : ownClamped;
+  memo.set(el, result);
+  return result;
 }
 
 /**
  * First ancestor whose backgroundColor is non-transparent, composited with
  * its own ancestor background if it's semi-transparent. Falls back to white
  * when nothing opaque is found (matches the browser's default canvas).
+ *
+ * Memoized: once an ancestor's effective background is known, every
+ * descendant reuses it. This collapses the worst-case O(D²) recursion from
+ * the previous implementation to O(D).
  */
-function effectiveBackground(el: Element): Color | null {
-  let cur: Element | null = el;
-  while (cur) {
-    const cs = window.getComputedStyle(cur);
-    const bg = parseColor(cs.backgroundColor);
+function effectiveBackground(el: Element, memo: WeakMap<Element, Color>): Color {
+  const cached = memo.get(el);
+  if (cached) return cached;
+
+  const cs = window.getComputedStyle(el);
+  const bg = parseColor(cs.backgroundColor);
+  const parent = el.parentElement;
+
+  let result: Color;
+  if (bg && bg.a >= 0.95) {
+    result = bg;
+  } else if (!parent) {
+    // Reached the documentElement with nothing opaque: assume default canvas.
+    result = { r: 255, g: 255, b: 255, a: 1 };
+  } else {
+    const parentBg = effectiveBackground(parent, memo);
     if (bg && bg.a > 0.05) {
-      if (bg.a >= 0.95) return bg;
-      const parentBg: Color =
-        (cur.parentElement && effectiveBackground(cur.parentElement)) ??
-        { r: 255, g: 255, b: 255, a: 1 };
-      return composite(bg, parentBg);
+      result = composite(bg, parentBg);
+    } else {
+      result = parentBg;
     }
-    cur = cur.parentElement;
   }
-  return { r: 255, g: 255, b: 255, a: 1 };
+  memo.set(el, result);
+  return result;
 }
 
 // Alpha composite "src over dst" — assumes dst is opaque.
