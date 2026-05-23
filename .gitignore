@@ -20,6 +20,7 @@ vite.config.ts.timestamp-*.mjs
 *~
 .history/
 .cursor/
+.claude/
 
 # --- OS junk ---
 .DS_Store
