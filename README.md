@@ -58,6 +58,20 @@ git push --follow-tags
 
 Flags: `--no-tag`, `--no-zip`, `--no-commit`.
 
+### Auto-release on merge
+
+`.github/workflows/release.yml` runs the same `scripts/release.mjs` pipeline
+whenever something lands on `main`. The bump comes from a label on the
+merged PR:
+
+- `release:major` / `release:minor` / `release:patch` — explicit bump
+- no label — defaults to **patch**
+- `release:skip` — no release this time (use for docs/chore PRs)
+
+Manual run: **Actions → Release → Run workflow** lets you pick the bump
+(or pass an explicit `X.Y.Z`). The workflow ignores its own `release:` and
+`chore: pre-release sync` commits to avoid loops.
+
 ## First-time GitHub setup
 
 ```bash

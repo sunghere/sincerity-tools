@@ -1,0 +1,112 @@
+name: Release
+
+# Triggers:
+#   - Push to main: every merge runs the release pipeline. The merged PR's
+#     label decides the bump:
+#       release:major  -> major
+#       release:minor  -> minor
+#       release:patch  -> patch (default if no label)
+#       release:skip   -> no release this time
+#   - Manual dispatch: pick the bump from the Actions UI.
+#
+# Loop guard: the release commit (`release: vX.Y.Z`) and the pre-release sync
+# commit (`chore: pre-release sync`) made by scripts/release.mjs would re-trigger
+# this workflow. The `if:` block below skips them. (Belt-and-suspenders: pushes
+# made with GITHUB_TOKEN don't actually trigger downstream workflows by default,
+# but the guard makes intent obvious.)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "patch | minor | major | X.Y.Z"
+        required: true
+        default: "patch"
+        type: string
+
+permissions:
+  contents: write  # push the release commit + tag, create the GitHub Release
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        !startsWith(github.event.head_commit.message, 'release:') &&
+        !startsWith(github.event.head_commit.message, 'chore: pre-release sync')
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history so release.mjs can read previous tag for auto notes.
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install
+        run: npm ci
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Decide bump
+        id: bump
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+          DISPATCH_BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT" == "workflow_dispatch" ]]; then
+            echo "value=$DISPATCH_BUMP" >> "$GITHUB_OUTPUT"
+            echo "source=workflow_dispatch" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Ask the API which PR(s) include this merge SHA. For squash and merge
+          # commits there's exactly one; for direct pushes the list is empty.
+          labels=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+            --jq '.[0].labels[].name' 2>/dev/null || true)
+          echo "PR labels for ${{ github.sha }}:"
+          echo "$labels"
+
+          bump=""
+          while IFS= read -r l; do
+            case "$l" in
+              release:skip)  bump="skip" ;;
+              release:major) bump="major" ;;
+              release:minor) bump="minor" ;;
+              release:patch) bump="patch" ;;
+            esac
+          done <<< "$labels"
+
+          if [[ -z "$bump" ]]; then bump="patch"; fi
+          echo "value=$bump" >> "$GITHUB_OUTPUT"
+          echo "source=pr-label" >> "$GITHUB_OUTPUT"
+
+      - name: Skip (release:skip label)
+        if: steps.bump.outputs.value == 'skip'
+        run: echo "::notice::release:skip label present — no release this run."
+
+      - name: Run release
+        if: steps.bump.outputs.value != 'skip'
+        env:
+          # release.mjs invokes `gh release create`; gh CLI picks up GH_TOKEN.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "::notice::Releasing (bump=${{ steps.bump.outputs.value }}, source=${{ steps.bump.outputs.source }})"
+          node scripts/release.mjs "${{ steps.bump.outputs.value }}"
