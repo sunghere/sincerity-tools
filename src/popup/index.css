@@ -1,0 +1,152 @@
+:root {
+  color-scheme: light dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  width: 320px;
+  font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 14px 16px 12px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.logo {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  color: #ffffff;
+}
+
+.head-text h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.tagline {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.desc {
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  margin-bottom: 10px;
+}
+
+.hint {
+  font-size: 11px;
+  color: #6b7280;
+  margin-bottom: 12px;
+}
+
+.hint strong {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.hint em {
+  font-style: normal;
+  font-weight: 600;
+  color: #4f46e5;
+}
+
+.meta {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 10px;
+  font-size: 11px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 2px 0;
+}
+
+.label {
+  color: #6b7280;
+}
+
+.val {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color: #111827;
+}
+
+.val.build {
+  word-break: break-all;
+  text-align: right;
+  max-width: 60%;
+}
+
+.val.build.dirty {
+  color: #b45309;
+}
+
+.copy {
+  margin-top: 8px;
+  color: #9ca3af;
+  font-size: 10px;
+  text-align: right;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #0f172a;
+    color: #e5e7eb;
+  }
+  .desc {
+    background: #1e293b;
+  }
+  .hint {
+    color: #94a3b8;
+  }
+  .hint strong {
+    color: #e5e7eb;
+  }
+  .hint em {
+    color: #a5b4fc;
+  }
+  .meta {
+    border-color: #334155;
+  }
+  .label,
+  .copy {
+    color: #94a3b8;
+  }
+  .val {
+    color: #e5e7eb;
+  }
+  .val.build.dirty {
+    color: #fbbf24;
+  }
+}

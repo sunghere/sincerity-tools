@@ -8,7 +8,8 @@ export default defineManifest({
   description: "Selection-driven developer tools (base64 encode/decode, ...).",
   permissions: ["contextMenus"],
   action: {
-    default_title: "Sincerity Tools"
+    default_title: "Sincerity Tools",
+    default_popup: "src/popup/index.html"
   },
   background: {
     service_worker: "src/background/index.ts",
