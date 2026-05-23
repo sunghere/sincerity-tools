@@ -30,21 +30,25 @@ function onMouseUp(e: MouseEvent): void {
 
   // Defer to next tick — by the time `mouseup` fires the selection is usually
   // committed, but a 0ms timeout removes the last edge case where it isn't.
-  window.setTimeout(handleSelection, 0);
+  //
+  // We capture the event's composedPath() *now* (not inside the timeout) because
+  // composedPath() is only valid during dispatch — after dispatch finishes it
+  // returns []. The path is what lets us reach selections that live inside an
+  // open ShadowRoot: window.getSelection() retargets such selections to the
+  // host (so it looks collapsed/empty to us), but ShadowRoot.getSelection()
+  // returns the real selection within that root.
+  const path = e.composedPath();
+  window.setTimeout(() => handleSelection(path), 0);
 }
 
-function handleSelection(): void {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+function handleSelection(eventPath: EventTarget[] = []): void {
+  const picked = pickSelection(eventPath);
+  if (!picked) {
     // Empty selection = stray click. Hide toolbar but leave popover alone.
     hideToolbar();
     return;
   }
-  const text = sel.toString();
-  if (!text.trim()) {
-    hideToolbar();
-    return;
-  }
+  const { sel, text } = picked;
 
   // Any new non-empty selection replaces both toolbar and popover.
   hidePopover();
@@ -72,6 +76,40 @@ function handleSelection(): void {
     anchor,
     onPick: (tool) => void runTool(tool, text, anchor),
   });
+}
+
+/**
+ * Returns the user's current selection, looking *inside* shadow roots when
+ * the top-level selection is empty/collapsed.
+ *
+ * Why: many SPAs (kone.gg, Notion-style editors, Reddit comments) render the
+ * post body inside an open ShadowRoot. Selections inside such roots are
+ * retargeted by `window.getSelection()` so they look collapsed from the light
+ * DOM. Chrome (and other Chromium browsers) expose a non-standard
+ * `ShadowRoot.getSelection()` that returns the real selection scoped to that
+ * root — we walk the mouseup event's composedPath to find candidate roots.
+ *
+ * `eventPath` is captured at dispatch time because `composedPath()` returns
+ * `[]` once the event has finished propagating.
+ */
+function pickSelection(eventPath: EventTarget[]): { sel: Selection; text: string } | null {
+  // 1. Top-level selection first — handles every normal (non-shadow) case.
+  const top = window.getSelection();
+  if (top && top.rangeCount > 0 && !top.isCollapsed) {
+    const text = top.toString();
+    if (text.trim()) return { sel: top, text };
+  }
+
+  // 2. Walk the event path for any ShadowRoots and ask each for its selection.
+  for (const node of eventPath) {
+    if (!(node instanceof ShadowRoot)) continue;
+    const shadowSel = (node as ShadowRoot & { getSelection?: () => Selection | null }).getSelection?.();
+    if (!shadowSel || shadowSel.rangeCount === 0 || shadowSel.isCollapsed) continue;
+    const text = shadowSel.toString();
+    if (text.trim()) return { sel: shadowSel, text };
+  }
+
+  return null;
 }
 
 function safeCanHandle(tool: Tool, text: string): boolean {
