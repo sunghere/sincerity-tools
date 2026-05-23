@@ -48,6 +48,12 @@ jobs:
         with:
           # Full history so release.mjs can read previous tag for auto notes.
           fetch-depth: 0
+          # On push events, actions/checkout leaves the working tree on a
+          # detached HEAD at the pushed SHA. release.mjs then commits onto
+          # that detached HEAD and `git push --follow-tags` happily pushes the
+          # tag but silently no-ops on the commit (no upstream), leaving main
+          # behind. Pin to main explicitly so the release commit lands there.
+          ref: main
 
       - name: Setup Node
         uses: actions/setup-node@v4
