@@ -63,6 +63,65 @@ body {
   margin-bottom: 10px;
 }
 
+.scans {
+  margin-bottom: 12px;
+}
+.scan-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #6b7280;
+  margin-bottom: 6px;
+}
+.scan-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  transition: background 80ms ease, border-color 80ms ease;
+}
+.scan-btn:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+.scan-btn:focus-visible {
+  outline: 2px solid #4f46e5;
+  outline-offset: 1px;
+}
+.scan-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #facc15 0%, #f59e0b 100%);
+  color: #111827;
+  flex-shrink: 0;
+}
+.scan-btn-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.scan-btn-text strong {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.scan-btn-text small {
+  font-size: 10.5px;
+  color: #6b7280;
+}
+
 .hint {
   font-size: 11px;
   color: #6b7280;
@@ -126,6 +185,18 @@ body {
   }
   .desc {
     background: #1e293b;
+  }
+  .scan-section-label,
+  .scan-btn-text small {
+    color: #94a3b8;
+  }
+  .scan-btn {
+    background: #1e293b;
+    border-color: #334155;
+  }
+  .scan-btn:hover {
+    background: #253449;
+    border-color: #475569;
   }
   .hint {
     color: #94a3b8;

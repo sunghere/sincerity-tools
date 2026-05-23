@@ -38,3 +38,23 @@ set("copy", (el) => {
   const year = new Date().getFullYear();
   el.textContent = `© ${year} Sincerity Tools · MIT`;
 });
+
+// --- page scans ---
+// The popup runs in its own context, so we dispatch into the active tab's
+// content script via chrome.tabs.sendMessage. Closing the popup afterward
+// makes the overlay/toast become the user's actual focus.
+async function runScan(scanId: string): Promise<void> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) return;
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: "sincerity:run-scan", scanId });
+  } catch {
+    // chrome:// and similar pages reject content-script messages — silently
+    // ignore; the user will notice when the popup closes and nothing happens.
+  }
+  window.close();
+}
+
+document.getElementById("run-hidden-text")?.addEventListener("click", () => {
+  void runScan("hidden-text-finder");
+});

@@ -19,6 +19,7 @@ import type { Tool } from "../types";
 import { ensureRoot, isInsideOurUI } from "./root";
 import { hidePopover, showPopover } from "./popover";
 import { hideToolbar, showToolbar, type ToolbarAnchor, type ToolbarEntry } from "./toolbar";
+import { runHiddenTextScan, hideOverlay, SCAN_ID as HIDDEN_TEXT_SCAN_ID } from "../scans/hidden-text-finder";
 
 // Wire listeners once.
 document.addEventListener("mouseup", onMouseUp, true);
@@ -153,6 +154,19 @@ function onKeyDown(e: KeyboardEvent): void {
   if (e.key === "Escape") {
     hideToolbar();
     hidePopover();
+    // The scan overlay also self-closes on ESC via its own listener; calling
+    // hideOverlay() here is the case where the overlay was the *only* UI up.
+    hideOverlay();
+  }
+}
+
+// --- page scans ---
+// Triggered from the popup button or the page-context menu item. The runner
+// owns its own overlay; we just dispatch by id.
+function runScan(scanId: string): void {
+  ensureRoot();
+  if (scanId === HIDDEN_TEXT_SCAN_ID) {
+    runHiddenTextScan();
   }
 }
 
@@ -163,7 +177,12 @@ function onKeyDown(e: KeyboardEvent): void {
 // back to a fixed viewport position if the selection has been cleared by the
 // time the menu closes), and reuse the same runTool() path as a toolbar click.
 chrome.runtime?.onMessage?.addListener((msg) => {
-  if (!msg || msg.type !== "sincerity:run-tool") return;
+  if (!msg) return;
+  if (msg.type === "sincerity:run-scan" && typeof msg.scanId === "string") {
+    runScan(msg.scanId);
+    return;
+  }
+  if (msg.type !== "sincerity:run-tool") return;
   const tool = allTools.find((t) => t.id === msg.toolId);
   if (!tool) return;
   const text = (msg.text as string | undefined) || window.getSelection()?.toString() || "";
