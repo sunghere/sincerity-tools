@@ -10,12 +10,15 @@
  *   node scripts/release.mjs 1.2.3                # explicit version
  *
  * Flags:
- *   --no-tag       Skip creating a git tag.
- *   --no-zip       Skip building the release zip.
- *   --no-commit    Don't create the version-bump commit.
- *   --no-push      Don't push or publish a GitHub Release (default: push + publish).
- *   --draft        gh release create --draft (mark the GitHub Release as draft).
- *   --notes "..."  Override release body (default: auto-generated from commit log).
+ *   --no-tag         Skip creating a git tag.
+ *   --no-zip         Skip building the release zip.
+ *   --no-commit      Don't create the version-bump commit.
+ *   --no-push        Don't push or publish a GitHub Release (default: push + publish).
+ *   --no-skip-tags   Bail if the target tag already exists, instead of
+ *                    auto-advancing past it (default behavior is to skip).
+ *   --no-fetch       Skip `git fetch --tags` before the tag-collision check.
+ *   --draft          gh release create --draft (mark the GitHub Release as draft).
+ *   --notes "..."    Override release body (default: auto-generated from commit log).
  */
 import { execSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, createWriteStream } from "node:fs";
@@ -67,25 +70,63 @@ if (!skipGit) {
 const pkgPath = resolve(root, "package.json");
 const pkg = readJson(pkgPath);
 const oldVersion = pkg.version;
-const newVersion = bumpVersion(oldVersion, bumpArg);
+let newVersion = bumpVersion(oldVersion, bumpArg);
 
-// Pre-flight: if a tag for the target version already exists (leftover from a
-// previous failed run), bail early with rescue instructions instead of
-// crashing mid-release after we've already bumped + built + committed.
+// Pre-flight: a tag for the target version may already exist — either because
+// a previous run failed mid-flight, or (more likely) because the auto-release
+// workflow previously created orphan tags (detached-HEAD bug: see the
+// `ref: main` fix in .github/workflows/release.yml). Rather than bail, we
+// advance to the next free version automatically. Pass `--no-skip-tags` to
+// restore the old strict behavior.
 if (!flags.has("--no-tag")) {
-  const tagExists = spawnSync("git", ["rev-parse", "-q", "--verify", `refs/tags/v${newVersion}`], {
-    cwd: root,
-    stdio: "ignore",
-  }).status === 0;
-  if (tagExists) {
-    console.error(`error: tag v${newVersion} already exists (leftover from a failed run).`);
-    console.error(`Rescue:`);
-    console.error(`  git tag -d v${newVersion}`);
-    console.error(`  git push --delete origin v${newVersion}   # if it was pushed`);
-    console.error(`  npm run release:patch                     # then retry`);
-    console.error(`Alternatively, pick an explicit higher version:`);
-    console.error(`  node scripts/release.mjs ${bumpVersion(newVersion, "patch")}`);
-    process.exit(1);
+  // Make sure our local view of remote tags is current — without this, a tag
+  // that exists on the remote but was never fetched locally would slip through.
+  // Failures (offline, no `origin`, etc.) are non-fatal — we proceed against
+  // local refs only — but we surface them so devs aren't surprised when a
+  // remote-only collision shows up later at push time.
+  if (!flags.has("--no-fetch")) {
+    const fetchResult = spawnSync("git", ["fetch", "--tags", "--quiet", "origin"], {
+      cwd: root,
+      stdio: "ignore",
+    });
+    if (fetchResult.status !== 0) {
+      console.warn("note: `git fetch --tags origin` failed; proceeding with local tags only.");
+    }
+  }
+
+  const skip = !flags.has("--no-skip-tags");
+  let skipped = [];
+  // Safety: never loop forever if something pathological happens with version parsing.
+  for (let attempts = 0; tagExists(newVersion); attempts++) {
+    if (attempts >= 50) {
+      console.error(`error: skipped past 50 existing tags starting at v${bumpVersion(oldVersion, bumpArg)}. Aborting.`);
+      process.exit(1);
+    }
+    if (!skip) {
+      console.error(`error: tag v${newVersion} already exists.`);
+      console.error(`Rescue:`);
+      console.error(`  git tag -d v${newVersion}`);
+      console.error(`  git push --delete origin v${newVersion}   # if it was pushed`);
+      console.error(`  npm run release:patch                     # then retry`);
+      console.error(`Alternatively, rerun without --no-skip-tags to auto-advance:`);
+      console.error(`  node scripts/release.mjs ${bumpArg}`);
+      process.exit(1);
+    }
+    skipped.push(newVersion);
+    newVersion = bumpVersion(newVersion, "patch");
+  }
+  if (skipped.length > 0) {
+    const msg =
+      `skipped existing tag(s) ${skipped.map((v) => `v${v}`).join(", ")}; ` +
+      `releasing v${newVersion} instead.`;
+    // GitHub Actions surfaces `::warning::`-prefixed lines in the run summary
+    // and on the PR/commit timeline; locally it just looks like a noisy
+    // warning, which is what we want either way.
+    if (process.env.GITHUB_ACTIONS === "true") {
+      console.log(`::warning::${msg}`);
+    } else {
+      console.warn(`WARNING: ${msg}`);
+    }
   }
 }
 
@@ -160,6 +201,23 @@ if (!flags.has("--no-push")) {
 }
 
 console.log(`\nDone. v${newVersion}`);
+
+function tagExists(v) {
+  const tagRef = `refs/tags/v${v}`;
+  // Local check (annotated or lightweight).
+  const local = spawnSync("git", ["rev-parse", "-q", "--verify", tagRef], {
+    cwd: root,
+    stdio: "ignore",
+  }).status === 0;
+  if (local) return true;
+  // Remote check (handles the case where the tag exists on origin but hasn't
+  // been fetched locally yet, e.g. fresh clone or CI runner cache miss).
+  const remote = spawnSync("git", ["ls-remote", "--tags", "--exit-code", "origin", tagRef], {
+    cwd: root,
+    stdio: "ignore",
+  }).status === 0;
+  return remote;
+}
 
 function bumpVersion(current, kind) {
   const semverRe = /^(\d+)\.(\d+)\.(\d+)$/;
