@@ -1,0 +1,51 @@
+#!/bin/sh
+# sincerity-tools:managed-hook
+#
+# After `git checkout <branch>` — same auto-build logic as post-merge so a
+# branch switch immediately syncs dist/ with the new tree.
+#
+# Git passes: $1 = previous HEAD, $2 = new HEAD, $3 = flag (1 = branch
+# checkout, 0 = file checkout). We only run for branch checkouts to avoid
+# rebuilding on every `git checkout -- file`.
+
+set -e
+
+PREV_HEAD=$1
+NEW_HEAD=$2
+IS_BRANCH=$3
+
+if [ "$IS_BRANCH" != "1" ]; then
+  exit 0
+fi
+if [ "$PREV_HEAD" = "$NEW_HEAD" ]; then
+  exit 0
+fi
+if [ "$SINCERITY_SKIP_POSTMERGE" = "1" ]; then
+  exit 0
+fi
+
+changed=$(git diff --name-only "$PREV_HEAD" "$NEW_HEAD" 2>/dev/null || true)
+if [ -z "$changed" ]; then
+  exit 0
+fi
+
+needs_install=0
+needs_build=0
+if echo "$changed" | grep -qE '^(package\.json|package-lock\.json)$'; then
+  needs_install=1
+  needs_build=1
+fi
+if echo "$changed" | grep -qE '^(src/|vite\.config\.ts$|manifest\.config\.ts$)'; then
+  needs_build=1
+fi
+
+if [ "$needs_install" = "1" ]; then
+  echo "[sincerity-tools] package files changed — running npm install…"
+  npm install --silent
+fi
+
+if [ "$needs_build" = "1" ]; then
+  echo "[sincerity-tools] sources changed — running npm run build…"
+  npm run build --silent
+  echo "[sincerity-tools] build done. Reload the unpacked extension at chrome://extensions to pick it up."
+fi

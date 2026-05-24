@@ -32,6 +32,14 @@ npm run dev     # builds to dist/ and watches
 Then load `dist/` as an unpacked extension at `chrome://extensions` with
 Developer Mode on.
 
+`npm install` also installs `post-merge` / `post-checkout` git hooks (via the
+`prepare` script — see `scripts/setup-git-hooks.mjs`). After `git pull` or
+a branch switch they automatically run `npm install` / `npm run build` when
+source files moved, so `dist/` stays in sync with `main`. You still need to
+hit the reload icon on the extension card at `chrome://extensions` after
+the build finishes — Chrome doesn't auto-reload unpacked extensions. Set
+`SINCERITY_SKIP_POSTMERGE=1` to bypass the hooks for a single command.
+
 ## Build
 
 ```bash

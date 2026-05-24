@@ -9,7 +9,14 @@
  * screen-reader label is naturally suppressed rather than hard-filtered.
  */
 
-const MIN_SCORE = 25;
+// Threshold tuning history:
+//   v1 used 25, which let any single 30-weight signal flag on its own. That
+//   caused a flood of false positives on collapsed accordions, modal
+//   drawers parked at left:-9999px, sr-only labels using clip+clip-path,
+//   etc. Raised to 40 so a single moderate signal stays below threshold and
+//   real hidden text needs corroborating evidence (e.g. low contrast +
+//   tiny font, or clipped + zero-size, or offscreen + sr-only NOT present).
+const MIN_SCORE = 40;
 // Safety budget — even huge pages typically have fewer than a few thousand
 // text nodes; this guards against truly pathological DOM trees.
 const MAX_TEXT_NODES = 50_000;
@@ -28,7 +35,12 @@ const SKIP_TAGS = new Set([
   "IFRAME",
 ]);
 
-const SR_ONLY_CLASS = /\b(sr-only|sr_only|visually-?hidden|visuallyhidden|screen-?reader|screenreader|a11y-only)\b/i;
+// Common "this is intentionally invisible to sighted users" class-name
+// patterns across the major design systems we've encountered in the wild.
+// Hits here add a strong negative weight rather than hard-skip so a class
+// name typo doesn't accidentally cloak abusive text — but combined with
+// the new hard-skips below, legitimate sr-only patterns reliably suppress.
+const SR_ONLY_CLASS = /\b(sr-only|sr_only|visually-?hidden|visuallyhidden|screen-?reader|screenreader|screen-reader-text|a11y-only|assistive-text|element-invisible|offscreen|usa-sr-only|govuk-visually-hidden|hidden-visually)\b/i;
 
 export interface Reason {
   code:
@@ -83,7 +95,11 @@ export interface ScanResult {
  */
 interface ScanContext {
   opacity: WeakMap<Element, number>;
-  background: WeakMap<Element, Color>;
+  // null is a valid memoized value — "we tried and the background isn't
+  // honestly determinable" (background-image / transparent root). WeakMap
+  // can store null; use .has() to distinguish "not computed yet" from
+  // "computed to null".
+  background: WeakMap<Element, Color | null>;
 }
 
 // Returns findings sorted by score desc, plus a truncation flag so the UI
@@ -150,9 +166,23 @@ function inspect(parent: Element, textNode: Text, id: number, ctx: ScanContext):
 
   const style = window.getComputedStyle(parent);
 
-  // Hard skip: not rendered at all. We're hunting *misleadingly hidden* text,
-  // not text the page itself chose to omit from the render tree.
-  if (style.display === "none" || style.visibility === "hidden") return null;
+  // Hard skips: the page is unambiguously hiding this from sighted *and*
+  // assistive users, or has marked it as intentional decoration. Either
+  // way, it's not "misleadingly hidden" — there's no abuse to surface.
+  if (style.display === "none") return null;
+  if (style.visibility === "hidden" || style.visibility === "collapse") return null;
+  if (parent.closest("[aria-hidden='true']")) return null;
+  if (parent.closest("[inert]")) return null;
+  if (parent.closest("[hidden]")) return null;
+  // role="presentation" / "none" explicitly mark the element as not exposing
+  // semantic text — flagging that would just be us second-guessing the author.
+  const role = parent.getAttribute("role");
+  if (role === "presentation" || role === "none") return null;
+  // Classic sr-only *shape* (1×1 clipped + overflow:hidden + position:absolute)
+  // catches Tailwind-style inline implementations that omit the conventional
+  // class name. If all four ingredients are present, treat as accessibility
+  // intent and skip — pattern is too specific to be abusive.
+  if (isClassicSrOnlyShape(parent, style)) return null;
 
   const reasons: Reason[] = [];
 
@@ -169,66 +199,89 @@ function inspect(parent: Element, textNode: Text, id: number, ctx: ScanContext):
   // 2. effective opacity (composed up the ancestor chain)
   const effOpacity = effectiveOpacity(parent, ctx.opacity);
   if (effOpacity < 0.05) {
-    reasons.push({ code: "opacity", detail: `effective ${effOpacity.toFixed(3)}`, weight: 40 });
+    reasons.push({ code: "opacity", detail: `effective ${effOpacity.toFixed(3)}`, weight: 45 });
   } else if (effOpacity < 0.2) {
-    reasons.push({ code: "opacity", detail: `effective ${effOpacity.toFixed(2)}`, weight: 20 });
+    reasons.push({ code: "opacity", detail: `effective ${effOpacity.toFixed(2)}`, weight: 15 });
   }
 
-  // 3. tiny font
+  // 3. tiny font — < 1px is structurally invisible; the 5px band was too
+  // generous (captions / footnotes legitimately ride that line), demoted.
   const fontSize = parseFloat(style.fontSize);
   if (Number.isFinite(fontSize)) {
     if (fontSize < 1) {
       reasons.push({ code: "tiny-font", detail: `${fontSize}px`, weight: 50 });
     } else if (fontSize < 5) {
-      reasons.push({ code: "tiny-font", detail: `${fontSize}px`, weight: 20 });
+      reasons.push({ code: "tiny-font", detail: `${fontSize}px`, weight: 10 });
     }
   }
 
-  // 4. text-indent off-screen
+  // 4. text-indent off-screen — single-signal weight kept moderate; needs
+  // corroboration unless the indent is truly extreme.
   const textIndent = parseFloat(style.textIndent);
   if (Number.isFinite(textIndent) && textIndent < -1000) {
     reasons.push({
       code: "offscreen-text-indent",
       detail: `text-indent=${textIndent}px`,
-      weight: 30,
+      weight: 20,
     });
   }
 
-  // 5. position absolute/fixed pushed off-screen
+  // 5. position absolute/fixed pushed off-screen — modal drawers, slide-in
+  // panels, and pre-portal containers routinely park at left:-9999px. Single
+  // signal must not flag alone; transitions/animations indicate intent to
+  // move into view, so skip those entirely.
   if (style.position === "absolute" || style.position === "fixed") {
     const left = parseFloat(style.left);
     const top = parseFloat(style.top);
-    if ((Number.isFinite(left) && left < -1000) || (Number.isFinite(top) && top < -1000)) {
+    const looksOffscreen = (Number.isFinite(left) && left < -1000) || (Number.isFinite(top) && top < -1000);
+    const hasTransition = style.transitionProperty && style.transitionProperty !== "none";
+    const hasAnimation = style.animationName && style.animationName !== "none";
+    const hasTransform = style.transform && style.transform !== "none";
+    if (looksOffscreen && !hasTransition && !hasAnimation && !hasTransform) {
       reasons.push({
         code: "offscreen-position",
         detail: `${style.position} left=${style.left} top=${style.top}`,
-        weight: 30,
+        weight: 20,
       });
     }
   }
 
-  // 6. clip / clip-path tricks
+  // 6. clip / clip-path tricks — both CSS properties match the same intent,
+  // so contribute *at most one* clipped reason per element (was previously
+  // double-counted, pushing sr-only patterns over threshold).
   const cp = style.clipPath;
-  if (cp === "inset(100%)" || cp === "inset(50%)" || cp === "rect(0px, 0px, 0px, 0px)") {
-    reasons.push({ code: "clipped", detail: `clip-path=${cp}`, weight: 30 });
-  }
-  // clip is deprecated but still respected by browsers — sr-only's classic recipe.
   const clip = style.clip;
-  if (clip && clip !== "auto" && /rect\(\s*0(?:px)?[, ]/.test(clip)) {
-    reasons.push({ code: "clipped", detail: `clip=${clip}`, weight: 30 });
+  const clipPathHidden = cp === "inset(100%)" || cp === "inset(50%)" || cp === "rect(0px, 0px, 0px, 0px)";
+  const clipAllZero = clip && clip !== "auto" && /rect\(\s*0(?:px)?[,\s]+\s*0(?:px)?[,\s]+\s*0(?:px)?[,\s]+\s*0(?:px)?\s*\)/.test(clip);
+  if (clipPathHidden || clipAllZero) {
+    const which = clipPathHidden ? `clip-path=${cp}` : `clip=${clip}`;
+    reasons.push({ code: "clipped", detail: which, weight: 25 });
   }
 
-  // 7. zero-size with overflow:hidden
+  // 7. zero-size with overflow:hidden — only flag when the element isn't
+  // mid-animation. Accordions, tab panels, Headless UI Transition states,
+  // and React Spring layouts all briefly show 0×0; skipping during
+  // transition/animation removes the bulk of FPs without losing real abuse.
   const rect = parent.getBoundingClientRect();
-  if ((rect.width === 0 || rect.height === 0) && style.overflow === "hidden") {
+  const elTransitioning = (style.transitionProperty && style.transitionProperty !== "none") ||
+                          (style.animationName && style.animationName !== "none");
+  if ((rect.width === 0 || rect.height === 0) && style.overflow === "hidden" && !elTransitioning) {
     reasons.push({
       code: "zero-size",
       detail: `${rect.width}x${rect.height} overflow:hidden`,
-      weight: 25,
+      weight: 18,
     });
   }
 
   // 8. contrast against effective background
+  //   - Drop the `< 3` band entirely. WCAG AA fail (between 3 and 4.5) is an
+  //     a11y warning, not "intentionally hidden" — flagging legitimate gray
+  //     metadata text was the single biggest FP source on normal pages.
+  //   - When effectiveBackground can't determine the bg (background-image,
+  //     gradient, or all-transparent ancestors), it returns null and we skip
+  //     the contrast check rather than fabricate white. Previously assumed
+  //     white caused light-text-on-dark-hero to compute contrast ~1.0 and
+  //     flag every hero section.
   let contrast: number | null = null;
   let bgStr: string | null = null;
   if (fg && fg.a >= 0.5) {
@@ -239,19 +292,19 @@ function inspect(parent: Element, textNode: Text, id: number, ctx: ScanContext):
       if (contrast < 1.2) {
         reasons.push({ code: "contrast", detail: `${contrast.toFixed(2)}:1`, weight: 50 });
       } else if (contrast < 1.5) {
-        reasons.push({ code: "contrast", detail: `${contrast.toFixed(2)}:1`, weight: 35 });
-      } else if (contrast < 3) {
-        reasons.push({ code: "contrast", detail: `${contrast.toFixed(2)}:1`, weight: 15 });
+        reasons.push({ code: "contrast", detail: `${contrast.toFixed(2)}:1`, weight: 30 });
       }
     }
   }
 
-  // 9. negative weight: legitimate accessibility intent
+  // 9. negative weight: legitimate accessibility intent (class-name match).
+  // Increased so a class-named sr-only with two corroborating clip/offscreen
+  // signals cleanly cancels back below threshold.
   if (looksLikeAccessibilityIntent(parent)) {
     reasons.push({
       code: "aria-intent",
       detail: "sr-only / visually-hidden",
-      weight: -25,
+      weight: -40,
     });
   }
 
@@ -334,30 +387,49 @@ function effectiveOpacity(el: Element, memo: WeakMap<Element, number>): number {
 
 /**
  * First ancestor whose backgroundColor is non-transparent, composited with
- * its own ancestor background if it's semi-transparent. Falls back to white
- * when nothing opaque is found (matches the browser's default canvas).
+ * its own ancestor background if it's semi-transparent.
  *
- * Memoized: once an ancestor's effective background is known, every
- * descendant reuses it. This collapses the worst-case O(D²) recursion from
- * the previous implementation to O(D).
+ * Returns `null` when we cannot honestly determine the background — i.e.:
+ *   - some ancestor in the chain uses `background-image` / a gradient
+ *     (computed `backgroundImage !== "none"`), or
+ *   - we reach `<html>` with everything transparent (likely a dark color
+ *     scheme drawn by the UA, which getComputedStyle reports as transparent).
+ *
+ * Earlier versions assumed a white fallback in those cases. That made light
+ * text on hero images, gradients, dark-mode pages, and `color-scheme: dark`
+ * compute as ~1.0 contrast on imagined white, flagging the whole page. The
+ * contrast branch in `inspect()` now skips entirely when this returns null.
+ *
+ * Memoized: each ancestor is computed once per scan.
  */
-function effectiveBackground(el: Element, memo: WeakMap<Element, Color>): Color {
-  const cached = memo.get(el);
-  if (cached) return cached;
+function effectiveBackground(el: Element, memo: WeakMap<Element, Color | null>): Color | null {
+  if (memo.has(el)) return memo.get(el) ?? null;
 
   const cs = window.getComputedStyle(el);
+  // A background-image (including gradients) means we can't compute contrast
+  // against a single solid color — pixel sampling would be required, which
+  // we explicitly opted out of for v1.
+  if (cs.backgroundImage && cs.backgroundImage !== "none") {
+    memo.set(el, null);
+    return null;
+  }
+
   const bg = parseColor(cs.backgroundColor);
   const parent = el.parentElement;
 
-  let result: Color;
+  let result: Color | null;
   if (bg && bg.a >= 0.95) {
     result = bg;
   } else if (!parent) {
-    // Reached the documentElement with nothing opaque: assume default canvas.
-    result = { r: 255, g: 255, b: 255, a: 1 };
+    // Hit the documentElement with nothing opaque. Could be the UA canvas
+    // (typically white, but the user's color-scheme might draw it dark);
+    // safer to admit ignorance than to fabricate white.
+    result = null;
   } else {
     const parentBg = effectiveBackground(parent, memo);
-    if (bg && bg.a > 0.05) {
+    if (!parentBg) {
+      result = null;
+    } else if (bg && bg.a > 0.05) {
       result = composite(bg, parentBg);
     } else {
       result = parentBg;
@@ -365,6 +437,23 @@ function effectiveBackground(el: Element, memo: WeakMap<Element, Color>): Color 
   }
   memo.set(el, result);
   return result;
+}
+
+/**
+ * The canonical "visually-hidden" CSS recipe distilled into a shape match:
+ * 1×1 element, overflow hidden, absolutely positioned, with a clip rule.
+ * Used to suppress sr-only patterns that don't carry the conventional class
+ * name (Tailwind inline implementations, custom design systems).
+ */
+function isClassicSrOnlyShape(el: Element, style: CSSStyleDeclaration): boolean {
+  if (style.position !== "absolute" && style.position !== "fixed") return false;
+  if (style.overflow !== "hidden") return false;
+  const rect = el.getBoundingClientRect();
+  if (rect.width > 2 || rect.height > 2) return false;
+  const hasClip =
+    (style.clip && style.clip !== "auto") ||
+    (style.clipPath && style.clipPath !== "none");
+  return Boolean(hasClip);
 }
 
 // Alpha composite "src over dst" — assumes dst is opaque.
