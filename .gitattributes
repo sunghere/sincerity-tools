@@ -1,0 +1,5 @@
+# Git hooks installed into .git/hooks/ are run by /bin/sh on every platform
+# (including Git for Windows' bundled MSYS sh). They MUST be LF — CRLF makes
+# the shebang interpreter look like `/bin/sh\r` and the hook silently fails.
+scripts/hooks/* text eol=lf
+*.sh            text eol=lf

@@ -1,0 +1,46 @@
+#!/bin/sh
+# sincerity-tools:managed-hook
+#
+# After `git pull` (or any merge) — if source files or deps changed in this
+# merge, automatically run `npm install` (when package.json / lockfile moved)
+# and `npm run build` so the loaded extension's dist/ matches the source.
+#
+# Why this exists: the popup shows the build's version/buildId. Pulling a
+# new release commit without rebuilding leaves Chrome loading the previous
+# dist/, so the popup version and the loaded behavior both lag main.
+#
+# Set SINCERITY_SKIP_POSTMERGE=1 to bypass this once (e.g. when bisecting).
+
+set -e
+
+if [ "$SINCERITY_SKIP_POSTMERGE" = "1" ]; then
+  echo "[sincerity-tools] post-merge skipped (SINCERITY_SKIP_POSTMERGE=1)."
+  exit 0
+fi
+
+# What changed between the previous HEAD and the new one?
+changed=$(git diff-tree -r --name-only --no-commit-id HEAD@{1} HEAD 2>/dev/null || true)
+if [ -z "$changed" ]; then
+  exit 0
+fi
+
+needs_install=0
+needs_build=0
+if echo "$changed" | grep -qE '^(package\.json|package-lock\.json)$'; then
+  needs_install=1
+  needs_build=1
+fi
+if echo "$changed" | grep -qE '^(src/|vite\.config\.ts$|manifest\.config\.ts$)'; then
+  needs_build=1
+fi
+
+if [ "$needs_install" = "1" ]; then
+  echo "[sincerity-tools] package files changed — running npm install…"
+  npm install --silent
+fi
+
+if [ "$needs_build" = "1" ]; then
+  echo "[sincerity-tools] sources changed — running npm run build…"
+  npm run build --silent
+  echo "[sincerity-tools] build done. Reload the unpacked extension at chrome://extensions to pick it up."
+fi
