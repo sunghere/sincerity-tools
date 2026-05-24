@@ -112,6 +112,11 @@ export const STYLES = `
     font-weight: 600;
     color: #f1f1f5;
   }
+  .popover-dismiss {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
   .popover-hint {
     font-size: 10px;
     font-weight: 500;
@@ -120,6 +125,38 @@ export const STYLES = `
     border-radius: 3px;
     padding: 1px 5px;
     letter-spacing: 0.5px;
+  }
+  .popover-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    color: #8a8a93;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 80ms ease, color 80ms ease;
+  }
+  .popover-close:hover {
+    background: #2c2c33;
+    color: #ffffff;
+  }
+  .popover-close:focus-visible {
+    outline: 2px solid #4d9fff;
+    outline-offset: 1px;
+  }
+  /* Match the error tint when the popover is in error state. */
+  .popover.error .popover-close {
+    color: #ff9c9c;
+  }
+  .popover.error .popover-close:hover {
+    background: rgba(255, 156, 156, 0.12);
+    color: #ffd4d4;
   }
   .popover-body {
     padding: 10px 12px;
