@@ -7,6 +7,13 @@ export default defineManifest({
   version: pkg.version,
   description: "Selection-driven developer tools (base64 encode/decode, ...).",
   permissions: ["contextMenus"],
+  // Granted on first use via chrome.permissions.request from the URL popover —
+  // keeps the install-time permission warning minimal.
+  optional_permissions: ["bookmarks"],
+  // Required to POST to the link-checker from the background service worker.
+  // The endpoint is a public CORS-enabled API but extension fetches still need
+  // the host listed here.
+  host_permissions: ["https://link-checker.nordvpn.com/*"],
   action: {
     default_title: "Sincerity Tools",
     default_popup: "src/popup/index.html"
