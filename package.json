@@ -1,6 +1,6 @@
 {
   "name": "sincerity-tools",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "private": true,
   "description": "Chrome extension hosting a collection of small text-selection tools (base64, QR, URL inspector, ...).",
   "type": "module",
