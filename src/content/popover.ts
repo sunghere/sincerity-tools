@@ -26,15 +26,32 @@ export function showPopover(opts: ShowPopoverOpts): void {
   title.className = "popover-title";
   title.textContent = opts.result.title ?? opts.tool.name;
 
-  // Subtle "ESC" affordance — communicates the dismissal shortcut without
-  // adding a click target that conflicts with the "popover doesn't close on
-  // outside click" requirement.
+  // Dismissal affordances: an "ESC" badge communicates the keyboard shortcut,
+  // and a visible × button gives mouse users an explicit close target. Outside
+  // clicks still don't dismiss — that's a deliberate spec, see content/index.ts.
+  const dismiss = document.createElement("span");
+  dismiss.className = "popover-dismiss";
+
   const hint = document.createElement("span");
   hint.className = "popover-hint";
   hint.textContent = "ESC";
 
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "popover-close";
+  closeBtn.type = "button";
+  closeBtn.setAttribute("aria-label", "닫기");
+  closeBtn.textContent = "×";
+  closeBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  closeBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    hidePopover();
+  });
+
+  dismiss.appendChild(hint);
+  dismiss.appendChild(closeBtn);
+
   header.appendChild(title);
-  header.appendChild(hint);
+  header.appendChild(dismiss);
 
   // --- body ---
   const body = document.createElement("div");
