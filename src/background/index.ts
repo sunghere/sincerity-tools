@@ -101,11 +101,25 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 //   2. sincerity:check-url — POST to NordVPN's link-checker. Done from the
 //      background to centralize host_permissions and to avoid CORS quirks in
 //      arbitrary content-script origins.
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || typeof msg !== "object") return;
+
+  // Defense in depth: only honor messages from our own extension. Without
+  // `externally_connectable` declared, web pages can't sendMessage to us
+  // anyway — this is the belt to the suspenders. `sender.id` is the
+  // extension id for content-script messages.
+  if (sender.id !== chrome.runtime.id) return;
+
   const m = msg as { type?: unknown; url?: unknown };
 
   if (m.type === "sincerity:bookmark-add" && typeof m.url === "string") {
+    // The dblclick handler that triggers bookmark-add only runs in the top
+    // frame (see content/url-actions/index.ts). If a request arrives from a
+    // child frame the user couldn't have produced it through the UI — drop.
+    if (sender.frameId !== 0) {
+      sendResponse({ ok: false, reason: "non-top-frame" });
+      return true;
+    }
     handleBookmarkAdd(m.url).then(sendResponse);
     return true; // keep the message channel open for the async response
   }
@@ -295,10 +309,15 @@ async function handleCheckUrlRancert(url: string): Promise<RancertResponse> {
 
 // Pulled out for unit-testability and so the regex shape is easy to find.
 const RANCERT_ROW_RE = /<td class="leftPadd">([^<]+)<\/td>\s*<td>([^<]+)<\/td>/g;
+// Sanity bound on the iteration count — Rancert returns ~60 engines in
+// practice; anything above this is either a layout we don't understand
+// or a malicious response trying to make us melt CPU on regex iteration.
+const RANCERT_MAX_ROWS = 200;
 
 function parseRancertHtml(html: string): RancertResponse {
   const counts = { clean: 0, unrated: 0, suspicious: 0, malicious: 0, total: 0 };
   for (const m of html.matchAll(RANCERT_ROW_RE)) {
+    if (counts.total >= RANCERT_MAX_ROWS) break;
     const result = m[2].trim().toLowerCase();
     counts.total++;
     if (result.includes("malic") || result.includes("phish") || result.includes("unsafe") || result.includes("danger")) {

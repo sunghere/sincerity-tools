@@ -1,12 +1,12 @@
 /**
- * Mirrors the heuristic warnings the `url-inspector` tool surfaces in the
- * selection popover. Duplicated locally (instead of importing) so the
- * dblclick flow doesn't pull the whole tool module into the content
- * bundle's startup path — the tool registry is separately tree-shaken.
+ * URL safety heuristics shared between:
+ *   - `tools/url-inspector` (selection-driven, runs from the toolbar)
+ *   - `content/url-actions/popover` (dblclick-driven)
  *
- * Keep in sync with `src/tools/url-inspector/index.ts::collectWarnings`.
+ * Pure function — no DOM, no chrome.*, no imports. Both bundles tree-shake
+ * it correctly and ship a single copy through the registry.
  */
-export function collectWarnings(u: URL): string[] {
+export function collectUrlWarnings(u: URL): string[] {
   const w: string[] = [];
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(u.hostname)) {
     w.push("⚠ 도메인 대신 IP 주소를 사용합니다 — 일반적인 사이트는 아닙니다.");

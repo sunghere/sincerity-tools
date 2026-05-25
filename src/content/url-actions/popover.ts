@@ -14,7 +14,7 @@
  *    than a header + body + footer split.
  */
 import { ensureRoot } from "../root";
-import { collectWarnings } from "./inspector";
+import { collectUrlWarnings } from "../../shared/url-warnings";
 
 export interface UrlPopoverAnchor {
   pageX: number;
@@ -50,6 +50,9 @@ export function showUrlPopover(opts: ShowUrlPopoverOpts): void {
 
   const safetyWrap = document.createElement("div");
   safetyWrap.className = "url-pop-safety-wrap";
+  // aria-live polite so screen readers announce the verdict swap from
+  // "검사 중" to "안전" / "위험 신호" without interrupting the user.
+  safetyWrap.setAttribute("aria-live", "polite");
   safetyWrap.appendChild(buildSafetyRow("nordvpn", "NordVPN"));
   safetyWrap.appendChild(buildSafetyRow("rancert", "Rancert"));
   el.appendChild(safetyWrap);
@@ -134,6 +137,12 @@ function buildActions(url: string): HTMLDivElement {
   const bookmarkBtn = actionBtn({
     label: "북마크 추가",
     onClick: async () => {
+      // Reset visible state every click. Without this, a button that landed
+      // on "권한 거부" or "실패" earlier would keep that label even after a
+      // subsequent success (since the success path only sets "추가됨" but
+      // never clears the err class added previously).
+      bookmarkBtn.classList.remove("err", "done");
+      bookmarkBtn.textContent = "북마크 추가";
       bookmarkBtn.disabled = true;
       try {
         // Optional permission: the install-time prompt skipped 'bookmarks',
@@ -194,7 +203,7 @@ function buildActions(url: string): HTMLDivElement {
 }
 
 function buildWarnings(u: URL): HTMLDivElement | null {
-  const warnings = collectWarnings(u);
+  const warnings = collectUrlWarnings(u);
   if (warnings.length === 0) return null;
   const wrap = document.createElement("div");
   wrap.className = "url-pop-warn";
@@ -212,14 +221,19 @@ function buildSafetyRow(provider: "nordvpn" | "rancert", label: string): HTMLDiv
   wrap.className = "url-pop-safety pending";
   wrap.dataset.provider = provider;
   // CSS spinner instead of an emoji so the loading state actually animates
-  // and looks distinct from "no result yet" emoji placeholders.
-  wrap.innerHTML = `
-    <div class="url-pop-safety-head">
-      <span class="url-pop-safety-icon"><span class="url-pop-spinner"></span></span>
-      <span class="url-pop-safety-provider">${label}</span>
-      <span class="url-pop-safety-label">검사 중…</span>
-    </div>
-  `;
+  // and looks distinct from "no result yet" emoji placeholders. Imperative
+  // DOM construction so `label` is never interpolated into raw HTML.
+  const head = document.createElement("div");
+  head.className = "url-pop-safety-head";
+  const iconWrap = document.createElement("span");
+  iconWrap.className = "url-pop-safety-icon";
+  const spinner = document.createElement("span");
+  spinner.className = "url-pop-spinner";
+  iconWrap.appendChild(spinner);
+  head.appendChild(iconWrap);
+  head.appendChild(span("url-pop-safety-provider", label));
+  head.appendChild(span("url-pop-safety-label", "검사 중…"));
+  wrap.appendChild(head);
   return wrap;
 }
 
@@ -300,37 +314,49 @@ function renderProviderRow(
   detail: string | undefined
 ): void {
   section.classList.remove("pending", "safe", "danger", "unknown", "error");
+  // Imperative DOM construction — every interpolated value flows through
+  // `textContent`, so a future-added provider field cannot create an XSS
+  // shape (compared with the previous innerHTML template-string approach).
+  section.replaceChildren();
 
+  let icon: string;
+  let label: string;
+  let extra: string | undefined;
   if (!res.ok) {
     section.classList.add("error");
-    const { label, hint } = labelsForError(res.error);
-    const hintHtml = hint ? `<div class="url-pop-safety-detail">${escapeHtml(hint)}</div>` : "";
-    section.innerHTML = `
-      <div class="url-pop-safety-head">
-        <span class="url-pop-safety-icon">!</span>
-        <span class="url-pop-safety-provider">${escapeHtml(provider)}</span>
-        <span class="url-pop-safety-label">${escapeHtml(label)}</span>
-      </div>
-      ${hintHtml}
-    `;
-    return;
+    icon = "!";
+    const e = labelsForError(res.error);
+    label = e.label;
+    extra = e.hint;
+  } else {
+    const verdict = res.verdict ?? "unknown";
+    const cls = verdict === "safe" ? "safe" : verdict === "malicious" ? "danger" : "unknown";
+    section.classList.add(cls);
+    icon = verdict === "safe" ? "✓" : verdict === "malicious" ? "⚠" : "?";
+    label = verdict === "safe" ? "안전" : verdict === "malicious" ? "위험 신호" : "판정 보류";
+    extra = detail;
   }
 
-  const verdict = res.verdict ?? "unknown";
-  const cls = verdict === "safe" ? "safe" : verdict === "malicious" ? "danger" : "unknown";
-  const icon = verdict === "safe" ? "✓" : verdict === "malicious" ? "⚠" : "?";
-  const label =
-    verdict === "safe" ? "안전" : verdict === "malicious" ? "위험 신호" : "판정 보류";
-  section.classList.add(cls);
-  const detailHtml = detail ? `<div class="url-pop-safety-detail">${escapeHtml(detail)}</div>` : "";
-  section.innerHTML = `
-    <div class="url-pop-safety-head">
-      <span class="url-pop-safety-icon">${icon}</span>
-      <span class="url-pop-safety-provider">${escapeHtml(provider)}</span>
-      <span class="url-pop-safety-label">${label}</span>
-    </div>
-    ${detailHtml}
-  `;
+  const head = document.createElement("div");
+  head.className = "url-pop-safety-head";
+  head.appendChild(span("url-pop-safety-icon", icon));
+  head.appendChild(span("url-pop-safety-provider", provider));
+  head.appendChild(span("url-pop-safety-label", label));
+  section.appendChild(head);
+
+  if (extra) {
+    const d = document.createElement("div");
+    d.className = "url-pop-safety-detail";
+    d.textContent = extra;
+    section.appendChild(d);
+  }
+}
+
+function span(cls: string, text: string): HTMLSpanElement {
+  const s = document.createElement("span");
+  s.className = cls;
+  s.textContent = text;
+  return s;
 }
 
 function labelsForError(error: CheckError | undefined): { label: string; hint?: string } {
@@ -415,15 +441,6 @@ function safeParse(raw: string): URL | null {
   } catch {
     return null;
   }
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
 }
 
 function sendMessage<T>(msg: unknown): Promise<T> {

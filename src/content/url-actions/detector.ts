@@ -2,18 +2,16 @@
  * Pulls a URL out of a `dblclick` event in one of two ways:
  *
  *   1. The click is inside an `<a href>` — easy, use the resolved href.
- *   2. The click is on plain text — locate the text node under the cursor,
- *      run a URL regex over its full content, and pick the match whose
- *      range contains the clicked character offset.
+ *      `event.composedPath()` is consulted so the lookup pierces open
+ *      shadow roots (web-component links work).
+ *   2. The click is on plain text — locate the text node under the cursor
+ *      via caretRangeFromPoint, run a URL regex over its full content, and
+ *      pick the match whose range contains the clicked character offset.
  *
  * Both paths return a *normalized* URL string with explicit protocol
- * (`example.com` → `https://example.com`) so downstream code can construct
- * `new URL(...)` without surprises.
- *
- * Why this aggressive (text-pattern) detection? The user explicitly asked
- * for it. The trade-off: dblclicking on `github.com` mentioned in casual
- * text triggers the popover. That's a UX wart we accept in exchange for
- * the more useful "dblclick anywhere on a URL" expectation.
+ * (`example.com` → `https://example.com`) plus the DOMRect we should anchor
+ * the popover to (the actual clicked line/range, not the full element box —
+ * a multi-line `<a>` or whole `<p>` was producing wildly off-cursor popovers).
  */
 
 const PROTOCOL_RE = /^https?:\/\//i;
@@ -26,31 +24,35 @@ const PROTOCOL_RE = /^https?:\/\//i;
 // is trimmed after the match.
 const URL_RE = /(https?:\/\/[^\s<>"']+|(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:\/[^\s<>"']*)?)/gi;
 
-// Single-segment hostnames that almost always represent something other
-// than a URL when typed in prose. Conservative — we don't want to drop
-// legitimate co.uk, .io, etc.
-const NON_URL_TLDS = new Set(["com.", "net.", "org."]); // (defensive; not actively used yet)
-
 export interface DetectedUrl {
   /** Normalized URL with protocol. */
   url: string;
   /** True when the source was an `<a href>` (high confidence). */
   fromAnchor: boolean;
+  /**
+   * Viewport-relative rect to anchor the popover under. For anchor matches
+   * we pick the rect under the cursor (handles line-wrapped links); for
+   * text matches we use the matched range's bounding rect (so the popover
+   * sits right under the URL, not under the whole paragraph).
+   */
+  rect: DOMRect;
 }
 
 export function detectUrlAt(event: MouseEvent): DetectedUrl | null {
-  // 1. Anchor path — highest confidence.
-  const anchor = findAnchor(event.target);
+  // 1. Anchor path — highest confidence. Walk composedPath so shadow-DOM
+  // <a>s (web components, embedded post bodies) are reachable; closest('a')
+  // alone stops at the shadow boundary.
+  const anchor = findAnchorInPath(event.composedPath());
   if (anchor && anchor.href) {
     const normalized = tryNormalize(anchor.href);
-    if (normalized) return { url: normalized, fromAnchor: true };
+    if (normalized) {
+      const rect = rectUnderCursor(anchor, event) ?? anchor.getBoundingClientRect();
+      return { url: normalized, fromAnchor: true, rect };
+    }
   }
 
-  // 2. Plain-text path — caretRangeFromPoint resolves to the text node at
-  // the cursor. caretFromPoint() is the standard replacement but Chrome
-  // still ships caretRangeFromPoint with broader compatibility.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const range = (document as any).caretRangeFromPoint?.(event.clientX, event.clientY) as Range | null;
+  // 2. Plain-text path.
+  const range = document.caretRangeFromPoint?.(event.clientX, event.clientY);
   if (!range || !range.startContainer || range.startContainer.nodeType !== Node.TEXT_NODE) {
     return null;
   }
@@ -72,15 +74,42 @@ export function detectUrlAt(event: MouseEvent): DetectedUrl | null {
     if (start > 0 && text[start - 1] === "@") continue;
 
     const normalized = tryNormalize(raw);
-    if (normalized) return { url: normalized, fromAnchor: false };
+    if (!normalized) continue;
+    // Re-open a range covering just the matched substring so the rect
+    // reflects the URL's actual line(s), not the entire text node.
+    const r = document.createRange();
+    try {
+      r.setStart(range.startContainer, start);
+      r.setEnd(range.startContainer, end);
+    } catch {
+      return { url: normalized, fromAnchor: false, rect: range.getBoundingClientRect() };
+    }
+    return { url: normalized, fromAnchor: false, rect: r.getBoundingClientRect() };
   }
   return null;
 }
 
-function findAnchor(target: EventTarget | null): HTMLAnchorElement | null {
-  if (!(target instanceof Element)) return null;
-  const a = target.closest("a");
-  return a instanceof HTMLAnchorElement ? a : null;
+function findAnchorInPath(path: EventTarget[]): HTMLAnchorElement | null {
+  for (const node of path) {
+    if (node instanceof HTMLAnchorElement && node.href) return node;
+  }
+  return null;
+}
+
+/**
+ * For a multi-line anchor (wraps across rows), `getBoundingClientRect()`
+ * returns the union — anchoring there puts the popover at the midpoint of
+ * the union, often far above or below the clicked line. Iterate the
+ * per-line client rects and pick the one whose vertical range contains
+ * the cursor.
+ */
+function rectUnderCursor(el: Element, event: MouseEvent): DOMRect | null {
+  const rects = Array.from(el.getClientRects());
+  if (rects.length <= 1) return rects[0] ?? null;
+  for (const r of rects) {
+    if (event.clientY >= r.top && event.clientY <= r.bottom) return r;
+  }
+  return rects[0];
 }
 
 function trimTrailingPunct(raw: string): string {
@@ -102,7 +131,6 @@ function tryNormalize(raw: string): string | null {
     if (parts.length < 2) return null;
     const tld = parts[parts.length - 1];
     if (tld.length < 2) return null;
-    if (NON_URL_TLDS.has(tld + ".")) return null;
     return u.toString();
   } catch {
     return null;
