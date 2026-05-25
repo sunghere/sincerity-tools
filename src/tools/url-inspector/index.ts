@@ -1,6 +1,22 @@
-import type { Tool, ToolAction, ToolResult } from "../../types";
-import { OPEN_ICON_SVG, looksLikeUrl } from "../url-shared/parse";
-import { collectUrlWarnings } from "../../shared/url-warnings";
+/**
+ * URL inspector — the tool the user invokes from the selection toolbar.
+ *
+ * The actual UI is the rich popover from `src/content/url-actions/popover.ts`
+ * which combines:
+ *   - URL header (host + path)
+ *   - Actions (열기 / 북마크 / 복사)
+ *   - Warning chips (IP host, punycode, http, credentials in URL, deep
+ *     subdomain — heuristics from src/shared/url-warnings.ts)
+ *   - URL breakdown (domain / path / query params)
+ *   - Two parallel safety verdicts (NordVPN, Rancert)
+ *
+ * The tool itself just normalizes the selection into a URL and hands off to
+ * `showUrlPopover`, then returns `skipPopover: true` so the framework
+ * doesn't paint a generic popover on top.
+ */
+import type { Tool, ToolResult, ToolRunContext } from "../../types";
+import { looksLikeUrl } from "../url-shared/parse";
+import { showUrlPopover } from "../../content/url-actions/popover";
 
 const ICON_SVG = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -17,11 +33,15 @@ export const urlInspectorTool: Tool = {
   canHandle(selection) {
     return looksLikeUrl(selection);
   },
-  run(selection): ToolResult {
-    const url = selection.trim();
-    let u: URL;
+  run(selection: string, ctx: ToolRunContext): ToolResult {
+    const raw = selection.trim();
+    // Normalize before handing off so the popover always sees a valid URL.
+    // Bare hostnames like "example.com" get an https:// prefix.
+    let normalized: string;
     try {
-      u = new URL(url);
+      const candidate = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+      const u = new URL(candidate);
+      normalized = u.toString();
     } catch (err) {
       return {
         title: "URL 분석 실패",
@@ -30,81 +50,15 @@ export const urlInspectorTool: Tool = {
       };
     }
 
-    const warnings = collectUrlWarnings(u);
-    const params: Array<[string, string]> = [];
-    u.searchParams.forEach((v, k) => params.push([k, v]));
-
-    const parts: string[] = [];
-    parts.push(`<div class="url-inspect">`);
-
-    if (warnings.length) {
-      parts.push(`<div class="url-warn">`);
-      for (const w of warnings) {
-        parts.push(`<div class="url-warn-row">${esc(w)}</div>`);
-      }
-      parts.push(`</div>`);
-    }
-
-    parts.push(row("도메인", u.hostname));
-    if (u.port) parts.push(row("포트", u.port));
-    if (u.pathname && u.pathname !== "/") parts.push(row("경로", u.pathname));
-
-    if (params.length) {
-      parts.push(`<div class="url-section-label">파라미터</div>`);
-      parts.push(`<div class="url-params">`);
-      for (const [k, v] of params) {
-        let display = v;
-        try { display = decodeURIComponent(v); } catch {}
-        parts.push(
-          `<div class="url-param">` +
-          `<span class="url-param-key">${esc(k)}</span>` +
-          `<span class="url-param-val">${esc(display)}</span>` +
-          `</div>`,
-        );
-      }
-      parts.push(`</div>`);
-    }
-
-    if (u.hash) parts.push(row("앵커", u.hash));
-
-    parts.push(`</div>`);
-
-    const actions: ToolAction[] = [
-      {
-        label: "열기",
-        iconSvg: OPEN_ICON_SVG,
-        variant: "primary",
-        onClick: () => window.open(url, "_blank", "noopener,noreferrer"),
-      },
-    ];
-
+    showUrlPopover({
+      url: normalized,
+      anchor: ctx.anchor,
+    });
+    // Custom popover already on-screen; suppress the generic one.
     return {
-      title: u.hostname,
-      body: url, // for copy
-      bodyHtml: parts.join(""),
+      body: normalized,
       status: "ok",
-      actions,
+      skipPopover: true,
     };
   },
 };
-
-// --- helpers ---
-
-function row(label: string, value: string): string {
-  return (
-    `<div class="url-row">` +
-    `<span class="url-label">${esc(label)}</span>` +
-    `<span class="url-val">${esc(value)}</span>` +
-    `</div>`
-  );
-}
-
-function esc(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-

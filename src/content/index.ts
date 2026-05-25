@@ -20,13 +20,7 @@ import { ensureRoot, isInsideOurUI } from "./root";
 import { hidePopover, showPopover } from "./popover";
 import { hideToolbar, showToolbar, type ToolbarAnchor, type ToolbarEntry } from "./toolbar";
 import { runHiddenTextScan, hideOverlay, SCAN_ID as HIDDEN_TEXT_SCAN_ID } from "../scans/hidden-text-finder";
-import { installUrlDblclickHandler, hideUrlPopover } from "./url-actions";
-
-// dblclick fires after the second mouseup, but our selection-toolbar path
-// runs via `setTimeout(0)` in onMouseUp — by then dblclick has already
-// asked to suppress the toolbar if it detected a URL. The probe returns a
-// one-shot true and resets, so subsequent selections behave normally.
-const dblclickHandler = installUrlDblclickHandler();
+import { hideUrlPopover } from "./url-actions/popover";
 
 // Wire listeners once.
 document.addEventListener("mouseup", onMouseUp, true);
@@ -50,14 +44,6 @@ function onMouseUp(e: MouseEvent): void {
 }
 
 function handleSelection(eventPath: EventTarget[] = []): void {
-  // If the just-finished mouseup was actually the second click of a dblclick
-  // that landed on a URL, the URL popover is now up. Don't paint the
-  // selection toolbar on top of it.
-  if (dblclickHandler.shouldSuppressToolbar()) {
-    hideToolbar();
-    return;
-  }
-
   const picked = pickSelection(eventPath);
   if (!picked) {
     // Empty selection = stray click. Hide toolbar but leave popover alone.
@@ -139,8 +125,13 @@ function safeCanHandle(tool: Tool, text: string): boolean {
 async function runTool(tool: Tool, text: string, anchor: ToolbarAnchor): Promise<void> {
   hideToolbar();
   try {
-    const result = await Promise.resolve(tool.run(text));
-    showPopover({ tool, result, anchor });
+    const result = await Promise.resolve(tool.run(text, { anchor }));
+    // Tools that render their own popover (e.g. URL inspector with async
+    // safety-check rows) set skipPopover so we don't paint a duplicate
+    // generic popover over their custom UI.
+    if (!result.skipPopover) {
+      showPopover({ tool, result, anchor });
+    }
   } catch (err) {
     showPopover({
       tool,

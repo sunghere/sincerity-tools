@@ -24,8 +24,24 @@ export interface Tool {
    * The returned `body` is rendered as text (not HTML) to avoid XSS on
    * untrusted selections. Use `bodyHtml` only when the tool produces
    * trusted, sanitized markup.
+   *
+   * `ctx` carries information the framework already computed and that a
+   * tool would otherwise have to rediscover — currently just the anchor
+   * rect for tools that want to render a custom popover (set
+   * `result.skipPopover` to true to suppress the generic one).
    */
-  run(selection: string): ToolResult | Promise<ToolResult>;
+  run(selection: string, ctx: ToolRunContext): ToolResult | Promise<ToolResult>;
+}
+
+export interface ToolRunContext {
+  /** Page-coordinate anchor for any custom UI the tool spawns. */
+  anchor: ToolAnchor;
+}
+
+export interface ToolAnchor {
+  pageX: number;
+  pageY: number;
+  pageBottom: number;
 }
 
 export interface ToolResult {
@@ -45,6 +61,13 @@ export interface ToolResult {
    * decoded result is a URL.
    */
   actions?: ToolAction[];
+  /**
+   * When true, the framework will NOT render the generic popover for this
+   * result. Tools that render their own custom UI (e.g. URL inspector with
+   * its async safety-check rows) set this and call their own popover from
+   * inside `run()`.
+   */
+  skipPopover?: boolean;
 }
 
 /**

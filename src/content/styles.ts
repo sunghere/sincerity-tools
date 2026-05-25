@@ -508,6 +508,17 @@ export const STYLES = `
     to { transform: rotate(360deg); }
   }
 
+  .url-pop-details {
+    padding: 8px 12px 10px;
+    border-bottom: 1px solid #2c2c33;
+    font-size: 11px;
+    max-height: 200px;
+    overflow: auto;
+  }
+  .url-pop-details .url-inspect { gap: 2px; }
+  .url-pop-details .url-row { line-height: 1.45; }
+  .url-pop-details .url-label { flex: 0 0 48px; }
+
   .url-pop-attrib {
     padding: 6px 12px;
     background: #1a1a1d;
