@@ -7,6 +7,19 @@ export default defineManifest({
   version: pkg.version,
   description: "Selection-driven developer tools (base64 encode/decode, ...).",
   permissions: ["contextMenus"],
+  // Granted on first use via chrome.permissions.request from the URL popover —
+  // keeps the install-time permission warning minimal.
+  optional_permissions: ["bookmarks"],
+  // Hosts the background service worker POSTs URL-safety checks to. Extension
+  // fetches need each one declared even when the endpoint is publicly
+  // CORS-enabled.
+  //   - link-checker.nordvpn.com  : NordVPN Link Checker (JSON)
+  //   - www.rancert.com           : Rancert / 한국랜섬웨어침해대응센터
+  //                                  (VirusTotal aggregator, returns HTML)
+  host_permissions: [
+    "https://link-checker.nordvpn.com/*",
+    "https://www.rancert.com/*",
+  ],
   action: {
     default_title: "Sincerity Tools",
     default_popup: "src/popup/index.html"

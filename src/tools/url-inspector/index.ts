@@ -1,5 +1,6 @@
 import type { Tool, ToolAction, ToolResult } from "../../types";
 import { OPEN_ICON_SVG, looksLikeUrl } from "../url-shared/parse";
+import { collectUrlWarnings } from "../../shared/url-warnings";
 
 const ICON_SVG = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -29,7 +30,7 @@ export const urlInspectorTool: Tool = {
       };
     }
 
-    const warnings = collectWarnings(u);
+    const warnings = collectUrlWarnings(u);
     const params: Array<[string, string]> = [];
     u.searchParams.forEach((v, k) => params.push([k, v]));
 
@@ -107,29 +108,3 @@ function esc(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
-/**
- * Surface non-obvious things about the URL that a regular user might want to
- * notice before clicking. Deliberately gentle wording — these are *signals*,
- * not accusations.
- */
-function collectWarnings(u: URL): string[] {
-  const w: string[] = [];
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(u.hostname)) {
-    w.push("⚠ 도메인 대신 IP 주소를 사용합니다 — 일반적인 사이트는 아닙니다.");
-  }
-  if (/(^|\.)xn--/i.test(u.hostname)) {
-    w.push("⚠ punycode가 포함된 도메인입니다 — 다른 사이트로 오해할 수 있어요.");
-  }
-  if (u.username || u.password) {
-    w.push("⚠ URL에 사용자 정보가 들어있습니다.");
-  }
-  if (u.protocol === "http:") {
-    w.push("⚠ 암호화되지 않은 http입니다 — 입력한 정보가 노출될 수 있습니다.");
-  }
-  // Long random-looking subdomain chain (heuristic for some phishing).
-  const labels = u.hostname.split(".");
-  if (labels.length >= 5) {
-    w.push("ℹ 서브도메인이 매우 깊습니다 — 한 번 더 확인해 보세요.");
-  }
-  return w;
-}

@@ -329,4 +329,190 @@ export const STYLES = `
     color: #7ad17a;
     border-color: #7ad17a;
   }
+
+  /* ---------- URL-on-dblclick popover ---------- */
+  .url-pop {
+    position: absolute;
+    z-index: 2147483647;
+    width: 320px;
+    color: #e8e8ec;
+    background: #1d1d20;
+    border: 1px solid #2c2c33;
+    border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+    user-select: none;
+    overflow: hidden;
+  }
+  .url-pop-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px 8px;
+    background: #25252b;
+    border-bottom: 1px solid #2c2c33;
+  }
+  .url-pop-title {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    flex: 1;
+  }
+  .url-pop-title strong {
+    font-size: 13px;
+    font-weight: 600;
+    color: #f1f1f5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .url-pop-path {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: #8a8a93;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .url-pop-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    color: #8a8a93;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .url-pop-close:hover { background: #2c2c33; color: #fff; }
+
+  .url-pop-actions {
+    display: flex;
+    gap: 6px;
+    padding: 10px 12px;
+    border-bottom: 1px solid #2c2c33;
+  }
+  .url-pop-btn {
+    flex: 1;
+    background: transparent;
+    border: 1px solid #3a3a42;
+    color: #d4d4d8;
+    border-radius: 5px;
+    padding: 5px 8px;
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 80ms ease, border-color 80ms ease, color 80ms ease;
+  }
+  .url-pop-btn:hover { background: #2c2c33; color: #fff; }
+  .url-pop-btn.primary {
+    background: #4d9fff;
+    border-color: #4d9fff;
+    color: #061224;
+    font-weight: 600;
+  }
+  .url-pop-btn.primary:hover { background: #6db0ff; border-color: #6db0ff; color: #061224; }
+  .url-pop-btn.done { color: #7ad17a; border-color: #7ad17a; }
+  .url-pop-btn.err { color: #ff9c9c; border-color: #ff9c9c; }
+  .url-pop-btn:disabled { opacity: 0.6; cursor: default; }
+
+  .url-pop-warn {
+    padding: 8px 12px;
+    background: rgba(240, 200, 96, 0.08);
+    border-bottom: 1px solid rgba(240, 200, 96, 0.18);
+    color: #f0c860;
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+  .url-pop-warn-row + .url-pop-warn-row { margin-top: 3px; }
+
+  .url-pop-safety-wrap {
+    display: flex;
+    flex-direction: column;
+  }
+  .url-pop-safety {
+    padding: 8px 12px;
+    border-bottom: 1px solid #2c2c33;
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+  .url-pop-safety + .url-pop-safety {
+    border-top: 0;
+  }
+  .url-pop-safety-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .url-pop-safety-provider {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: #8a8a93;
+    padding: 1px 6px;
+    border: 1px solid #3a3a42;
+    border-radius: 3px;
+    letter-spacing: 0.3px;
+  }
+  .url-pop-safety-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    background: #2c2c33;
+    color: #d4d4d8;
+    flex-shrink: 0;
+  }
+  .url-pop-safety-label { font-weight: 500; }
+  .url-pop-safety-detail {
+    margin-top: 4px;
+    margin-left: 26px;
+    color: #8a8a93;
+    font-size: 10.5px;
+  }
+  .url-pop-safety.pending .url-pop-safety-icon { background: #2c2c33; }
+  .url-pop-safety.pending .url-pop-safety-label { color: #b9b9c2; }
+  .url-pop-safety.safe .url-pop-safety-icon { background: #1f3320; color: #7ad17a; }
+  .url-pop-safety.safe .url-pop-safety-label { color: #7ad17a; }
+  .url-pop-safety.danger .url-pop-safety-icon { background: #3f1d1d; color: #ff9c9c; }
+  .url-pop-safety.danger .url-pop-safety-label { color: #ff9c9c; }
+  .url-pop-safety.unknown .url-pop-safety-icon { background: #3f3214; color: #facc15; }
+  .url-pop-safety.unknown .url-pop-safety-label { color: #facc15; }
+  /* "error" state is for transport/parse failures — visually distinct from
+     "unknown" (which is the *provider's* verdict). Muted gray-blue so users
+     don't read it as "the URL is dangerous". */
+  .url-pop-safety.error .url-pop-safety-icon { background: #2c2c38; color: #9aa3b2; }
+  .url-pop-safety.error .url-pop-safety-label { color: #b9b9c2; }
+  .url-pop-safety.error .url-pop-safety-detail { color: #8a8a93; }
+
+  .url-pop-spinner {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    border: 1.5px solid #4a4a52;
+    border-top-color: #d4d4d8;
+    border-radius: 50%;
+    animation: url-pop-spin 700ms linear infinite;
+  }
+  @keyframes url-pop-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .url-pop-attrib {
+    padding: 6px 12px;
+    background: #1a1a1d;
+    font-size: 10px;
+    color: #6b6b73;
+    text-align: right;
+  }
 `;
