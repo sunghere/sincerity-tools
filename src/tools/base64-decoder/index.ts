@@ -1,5 +1,7 @@
-import type { Tool, ToolAction, ToolResult } from "../../types";
+import type { Tool, ToolAction, ToolResult, ToolRunContext } from "../../types";
 import { decodeBase64, looksLikeBase64 } from "./decode";
+import { hidePopover } from "../../content/popover";
+import { showUrlPopover } from "../../content/url-actions/popover";
 
 const ICON_SVG = `
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -16,6 +18,14 @@ const OPEN_ICON_SVG = `
 </svg>
 `.trim();
 
+// Magnifying-glass icon, matches url-inspector tool's own glyph.
+const INSPECT_ICON_SVG = `
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <circle cx="7" cy="7" r="4.5"/>
+  <path d="M10.5 10.5l3.5 3.5"/>
+</svg>
+`.trim();
+
 export const base64DecoderTool: Tool = {
   id: "base64-decoder",
   name: "base64 디코드",
@@ -23,16 +33,30 @@ export const base64DecoderTool: Tool = {
   canHandle(selection) {
     return looksLikeBase64(selection);
   },
-  run(selection): ToolResult {
+  run(selection: string, ctx: ToolRunContext): ToolResult {
     try {
       const decoded = decodeBase64(selection.trim());
       const actions: ToolAction[] = [];
       if (isOpenableUrl(decoded)) {
+        const trimmed = decoded.trim();
         actions.push({
           label: "열기",
           iconSvg: OPEN_ICON_SVG,
           variant: "primary",
-          onClick: () => window.open(decoded.trim(), "_blank", "noopener,noreferrer"),
+          onClick: () => window.open(trimmed, "_blank", "noopener,noreferrer"),
+        });
+        // Bridge to the rich URL popover (host/path/params + NordVPN +
+        // Rancert verdicts) — common pattern when a base64 payload turns out
+        // to be a tracking link or a redirect target and the user wants to
+        // see what it points to before opening. Closes this popover first
+        // so the user lands on the URL popover cleanly.
+        actions.push({
+          label: "URL 분석",
+          iconSvg: INSPECT_ICON_SVG,
+          onClick: () => {
+            hidePopover();
+            showUrlPopover({ url: trimmed, anchor: ctx.anchor });
+          },
         });
       }
       return {

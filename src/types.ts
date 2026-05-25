@@ -15,6 +15,16 @@ export interface Tool {
    * matches the icon slot without extra CSS sizing rules.
    */
   iconSvg: string;
+  /**
+   * Right-click context-menu contexts where this tool should appear. Defaults
+   * to `["selection"]` — the user selected text and right-clicked. Tools that
+   * also make sense on a link (e.g. URL 분석) should add `"link"`, in which
+   * case the background passes `info.linkUrl` as the tool input.
+   *
+   * Chrome's full set: "selection", "link", "page", "image", "video", "audio",
+   * "editable", "frame". Most don't apply here; keep usage narrow.
+   */
+  contexts?: chrome.contextMenus.ContextType[];
   /** Quick filter: should this tool offer itself for this selection? */
   canHandle(selection: string): boolean;
   /**
