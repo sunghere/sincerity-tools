@@ -433,16 +433,32 @@ export const STYLES = `
   }
   .url-pop-warn-row + .url-pop-warn-row { margin-top: 3px; }
 
+  .url-pop-safety-wrap {
+    display: flex;
+    flex-direction: column;
+  }
   .url-pop-safety {
-    padding: 10px 12px;
+    padding: 8px 12px;
     border-bottom: 1px solid #2c2c33;
     font-size: 11.5px;
     line-height: 1.4;
+  }
+  .url-pop-safety + .url-pop-safety {
+    border-top: 0;
   }
   .url-pop-safety-head {
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+  .url-pop-safety-provider {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: #8a8a93;
+    padding: 1px 6px;
+    border: 1px solid #3a3a42;
+    border-radius: 3px;
+    letter-spacing: 0.3px;
   }
   .url-pop-safety-icon {
     display: inline-flex;

@@ -115,6 +115,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
+  if (m.type === "sincerity:check-url-rancert" && typeof m.url === "string") {
+    handleCheckUrlRancert(m.url).then(sendResponse);
+    return true;
+  }
+
   return undefined;
 });
 
@@ -204,4 +209,98 @@ function normalizeVerdict(json: Record<string, unknown>): Pick<SafetyResponse, "
 
   const detail = typeof json.message === "string" ? json.message : undefined;
   return { verdict, detail };
+}
+
+// ---- Rancert (한국랜섬웨어침해대응센터) ----
+//
+// Endpoint returns an HTML page that wraps a VirusTotal-style aggregation
+// table — ~60 URL-scanner engines, each labelled "clean site" / "unrated site"
+// / "malicious" / "phishing" / etc. We scrape the table with a regex (service
+// workers don't have DOMParser) and aggregate the engine counts.
+//
+// Rate limit: the site says 4 requests / minute, but that's per client IP —
+// we POST from the user's browser, not a shared server, so a normal user
+// dblclicking URLs won't hit it. A 429 / partial page just turns into an
+// "unknown" verdict downstream.
+
+const RANCERT_ENDPOINT = "https://www.rancert.com/virustotal_url_result.php";
+const RANCERT_REFERER = "https://www.rancert.com/check_url.php";
+
+interface RancertResponse {
+  ok: boolean;
+  verdict?: "safe" | "malicious" | "unknown";
+  /** Compact summary like "60/60 clean" or "2 malicious · 58 clean". */
+  summary?: string;
+  /** Per-bucket engine counts; useful for the popover detail line. */
+  counts?: { clean: number; unrated: number; suspicious: number; malicious: number; total: number };
+}
+
+async function handleCheckUrlRancert(url: string): Promise<RancertResponse> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const body = `p=u&strUrl=${encodeURIComponent(url)}`;
+    const res = await fetch(RANCERT_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        // Server checks the referer to gate the endpoint — without it the
+        // POST gets a generic page instead of a result.
+        "referer": RANCERT_REFERER,
+      },
+      body,
+      signal: controller.signal,
+    });
+    if (!res.ok) return { ok: false };
+    const html = await res.text();
+    return parseRancertHtml(html);
+  } catch {
+    return { ok: false };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// Pulled out for unit-testability and so the regex shape is easy to find.
+const RANCERT_ROW_RE = /<td class="leftPadd">([^<]+)<\/td>\s*<td>([^<]+)<\/td>/g;
+
+function parseRancertHtml(html: string): RancertResponse {
+  const counts = { clean: 0, unrated: 0, suspicious: 0, malicious: 0, total: 0 };
+  for (const m of html.matchAll(RANCERT_ROW_RE)) {
+    const result = m[2].trim().toLowerCase();
+    counts.total++;
+    if (result.includes("malic") || result.includes("phish") || result.includes("unsafe") || result.includes("danger")) {
+      counts.malicious++;
+    } else if (result.includes("suspici")) {
+      counts.suspicious++;
+    } else if (result === "clean site" || result.includes("harmless") || result === "clean") {
+      counts.clean++;
+    } else {
+      // Includes "unrated site", "no rating", anything we don't explicitly bucket.
+      counts.unrated++;
+    }
+  }
+  if (counts.total === 0) {
+    // Server returned a non-result page (rate-limited, invalid input, etc.).
+    return { ok: false };
+  }
+
+  // Any malicious engine wins — even one phishing flag is worth surfacing.
+  // Suspicious-only is "unknown" (something noticed *something*, but no hard
+  // hit). Otherwise: if any engine actively cleared the URL, call it safe;
+  // if every engine was unrated, stay unknown (no provider weighed in).
+  let verdict: "safe" | "malicious" | "unknown";
+  if (counts.malicious > 0) verdict = "malicious";
+  else if (counts.suspicious > 0) verdict = "unknown";
+  else if (counts.clean > 0) verdict = "safe";
+  else verdict = "unknown";
+
+  const summary =
+    counts.malicious > 0
+      ? `${counts.malicious} 위험 · ${counts.clean} 안전 / 전체 ${counts.total}`
+      : counts.suspicious > 0
+      ? `${counts.suspicious} 의심 · ${counts.clean} 안전 / 전체 ${counts.total}`
+      : `${counts.clean}/${counts.total} 안전`;
+
+  return { ok: true, verdict, summary, counts };
 }

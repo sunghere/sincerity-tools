@@ -47,7 +47,13 @@ export function showUrlPopover(opts: ShowUrlPopoverOpts): void {
   el.appendChild(buildActions(opts.url));
   const warnSection = buildWarnings(u);
   if (warnSection) el.appendChild(warnSection);
-  el.appendChild(buildSafety(opts.url));
+
+  const safetyWrap = document.createElement("div");
+  safetyWrap.className = "url-pop-safety-wrap";
+  safetyWrap.appendChild(buildSafetyRow("nordvpn", "NordVPN"));
+  safetyWrap.appendChild(buildSafetyRow("rancert", "Rancert"));
+  el.appendChild(safetyWrap);
+
   el.appendChild(buildAttribution());
 
   root.appendChild(el);
@@ -63,8 +69,9 @@ export function showUrlPopover(opts: ShowUrlPopoverOpts): void {
 
   current = el;
 
-  // Fire the async safety check and swap content when it returns.
-  void runSafetyCheck(opts.url, el);
+  // Fire async safety checks in parallel; each row updates independently.
+  void runNordvpnCheck(opts.url, el);
+  void runRancertCheck(opts.url, el);
 }
 
 export function hideUrlPopover(): void {
@@ -200,14 +207,15 @@ function buildWarnings(u: URL): HTMLDivElement | null {
   return wrap;
 }
 
-function buildSafety(_url: string): HTMLDivElement {
+function buildSafetyRow(provider: "nordvpn" | "rancert", label: string): HTMLDivElement {
   const wrap = document.createElement("div");
   wrap.className = "url-pop-safety pending";
-  wrap.dataset.role = "safety";
+  wrap.dataset.provider = provider;
   wrap.innerHTML = `
     <div class="url-pop-safety-head">
       <span class="url-pop-safety-icon">⏳</span>
-      <span class="url-pop-safety-label">피싱 검사 중…</span>
+      <span class="url-pop-safety-provider">${label}</span>
+      <span class="url-pop-safety-label">검사 중…</span>
     </div>
   `;
   return wrap;
@@ -216,61 +224,82 @@ function buildSafety(_url: string): HTMLDivElement {
 function buildAttribution(): HTMLDivElement {
   const f = document.createElement("div");
   f.className = "url-pop-attrib";
-  f.textContent = "URL safety: Powered by NordVPN Link Checker";
+  f.textContent = "Powered by NordVPN · Rancert (한국랜섬웨어침해대응센터)";
   return f;
 }
 
-// --------- async safety check ---------
+// --------- async safety checks ---------
 
-interface CheckResponse {
+interface NordvpnResponse {
   ok: boolean;
-  /** Provider's verdict, normalized: "safe" | "malicious" | "unknown". */
   verdict?: "safe" | "malicious" | "unknown";
-  /** Free-form provider message if any. */
   detail?: string;
 }
 
-async function runSafetyCheck(url: string, popover: HTMLDivElement): Promise<void> {
-  const section = popover.querySelector<HTMLDivElement>('[data-role="safety"]');
+interface RancertResponse {
+  ok: boolean;
+  verdict?: "safe" | "malicious" | "unknown";
+  summary?: string;
+  counts?: { clean: number; unrated: number; suspicious: number; malicious: number; total: number };
+}
+
+async function runNordvpnCheck(url: string, popover: HTMLDivElement): Promise<void> {
+  const section = popover.querySelector<HTMLDivElement>('[data-provider="nordvpn"]');
   if (!section) return;
-  let res: CheckResponse | null = null;
+  let res: NordvpnResponse | null = null;
   try {
-    res = await sendMessage<CheckResponse>({ type: "sincerity:check-url", url });
+    res = await sendMessage<NordvpnResponse>({ type: "sincerity:check-url", url });
   } catch {
     res = { ok: false };
   }
-  // Race: popover may have been dismissed while we were waiting.
   if (popover !== current) return;
+  renderVerdictRow(section, "NordVPN", res?.ok ? res.verdict : undefined, res?.detail);
+}
 
+async function runRancertCheck(url: string, popover: HTMLDivElement): Promise<void> {
+  const section = popover.querySelector<HTMLDivElement>('[data-provider="rancert"]');
+  if (!section) return;
+  let res: RancertResponse | null = null;
+  try {
+    res = await sendMessage<RancertResponse>({ type: "sincerity:check-url-rancert", url });
+  } catch {
+    res = { ok: false };
+  }
+  if (popover !== current) return;
+  renderVerdictRow(section, "Rancert", res?.ok ? res.verdict : undefined, res?.summary);
+}
+
+function renderVerdictRow(
+  section: HTMLDivElement,
+  provider: string,
+  verdict: "safe" | "malicious" | "unknown" | undefined,
+  detail: string | undefined
+): void {
   section.classList.remove("pending");
-  if (!res || !res.ok) {
+  if (verdict === undefined) {
     section.classList.add("unknown");
     section.innerHTML = `
       <div class="url-pop-safety-head">
         <span class="url-pop-safety-icon">?</span>
+        <span class="url-pop-safety-provider">${escapeHtml(provider)}</span>
         <span class="url-pop-safety-label">검사 일시적 불가</span>
       </div>
-      <div class="url-pop-safety-detail">잠시 후 다시 시도해 주세요.</div>
     `;
     return;
   }
-  const verdict = res.verdict ?? "unknown";
   const cls = verdict === "safe" ? "safe" : verdict === "malicious" ? "danger" : "unknown";
   const icon = verdict === "safe" ? "✓" : verdict === "malicious" ? "⚠" : "?";
   const label =
-    verdict === "safe"
-      ? "안전한 URL로 보입니다"
-      : verdict === "malicious"
-      ? "위험 신호가 감지되었습니다"
-      : "판정 결과를 받지 못했습니다";
+    verdict === "safe" ? "안전" : verdict === "malicious" ? "위험 신호" : "판정 보류";
   section.classList.add(cls);
-  const detail = res.detail ? `<div class="url-pop-safety-detail">${escapeHtml(res.detail)}</div>` : "";
+  const detailHtml = detail ? `<div class="url-pop-safety-detail">${escapeHtml(detail)}</div>` : "";
   section.innerHTML = `
     <div class="url-pop-safety-head">
       <span class="url-pop-safety-icon">${icon}</span>
+      <span class="url-pop-safety-provider">${escapeHtml(provider)}</span>
       <span class="url-pop-safety-label">${label}</span>
     </div>
-    ${detail}
+    ${detailHtml}
   `;
 }
 
