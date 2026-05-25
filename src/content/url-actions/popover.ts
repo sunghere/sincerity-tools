@@ -57,6 +57,9 @@ export function showUrlPopover(opts: ShowUrlPopoverOpts): void {
   safetyWrap.appendChild(buildSafetyRow("rancert", "Rancert"));
   el.appendChild(safetyWrap);
 
+  const detailsSection = buildDetails(u);
+  if (detailsSection) el.appendChild(detailsSection);
+
   el.appendChild(buildAttribution());
 
   root.appendChild(el);
@@ -242,6 +245,80 @@ function buildAttribution(): HTMLDivElement {
   f.className = "url-pop-attrib";
   f.textContent = "Powered by NordVPN · Rancert (한국랜섬웨어침해대응센터)";
   return f;
+}
+
+/**
+ * URL breakdown — domain / port / path / params / hash. Returns null if
+ * there's nothing more interesting than the bare host (already shown in
+ * the header), so the section disappears entirely instead of rendering
+ * empty.
+ */
+function buildDetails(u: URL): HTMLDivElement | null {
+  const params: Array<[string, string]> = [];
+  u.searchParams.forEach((v, k) => params.push([k, v]));
+  const hasPath = u.pathname && u.pathname !== "/";
+  const hasInterestingDetail = hasPath || u.port || params.length > 0 || u.hash;
+  if (!hasInterestingDetail) return null;
+
+  const wrap = document.createElement("div");
+  wrap.className = "url-pop-details";
+  // Reuse the existing .url-* classes so visuals match the legacy
+  // url-inspector popover (rows of label/value + a parameters block).
+  const inner = document.createElement("div");
+  inner.className = "url-inspect";
+
+  inner.appendChild(detailRow("도메인", u.hostname));
+  if (u.port) inner.appendChild(detailRow("포트", u.port));
+  if (hasPath) inner.appendChild(detailRow("경로", u.pathname));
+
+  if (params.length) {
+    const label = document.createElement("div");
+    label.className = "url-section-label";
+    label.textContent = "파라미터";
+    inner.appendChild(label);
+
+    const list = document.createElement("div");
+    list.className = "url-params";
+    for (const [k, v] of params) {
+      let display = v;
+      try {
+        display = decodeURIComponent(v);
+      } catch {
+        /* keep raw */
+      }
+      const row = document.createElement("div");
+      row.className = "url-param";
+      const key = document.createElement("span");
+      key.className = "url-param-key";
+      key.textContent = k;
+      const val = document.createElement("span");
+      val.className = "url-param-val";
+      val.textContent = display;
+      row.appendChild(key);
+      row.appendChild(val);
+      list.appendChild(row);
+    }
+    inner.appendChild(list);
+  }
+
+  if (u.hash) inner.appendChild(detailRow("앵커", u.hash));
+
+  wrap.appendChild(inner);
+  return wrap;
+}
+
+function detailRow(label: string, value: string): HTMLDivElement {
+  const row = document.createElement("div");
+  row.className = "url-row";
+  const lbl = document.createElement("span");
+  lbl.className = "url-label";
+  lbl.textContent = label;
+  const val = document.createElement("span");
+  val.className = "url-val";
+  val.textContent = value;
+  row.appendChild(lbl);
+  row.appendChild(val);
+  return row;
 }
 
 // --------- async safety checks ---------
