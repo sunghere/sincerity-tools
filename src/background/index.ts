@@ -21,19 +21,27 @@ const SCAN_HIDDEN_TEXT_ID = "sincerity:scan:hidden-text-finder";
 
 function buildMenu(): void {
   chrome.contextMenus.removeAll(() => {
-    // Parent appears whenever either a selection-driven child or the page
-    // scan would apply — i.e. on either a selection or a plain page click.
+    // Each tool declares which contexts it wants ("selection" by default;
+    // url-inspector adds "link" so it appears on right-click on hyperlinks).
+    // The parent menu's contexts must be the union of every child's so the
+    // parent itself is offered everywhere any child is — Chrome only shows
+    // the parent in contexts the parent declared.
+    const parentContexts = new Set<chrome.contextMenus.ContextType>(["selection", "page"]);
+    for (const tool of tools) {
+      for (const c of tool.contexts ?? ["selection"]) parentContexts.add(c);
+    }
+
     chrome.contextMenus.create({
       id: PARENT_ID,
       title: "Sincerity Tools",
-      contexts: ["selection", "page"],
+      contexts: Array.from(parentContexts),
     });
     for (const tool of tools) {
       chrome.contextMenus.create({
         id: ITEM_PREFIX + tool.id,
         parentId: PARENT_ID,
         title: tool.name,
-        contexts: ["selection"],
+        contexts: tool.contexts ?? ["selection"],
       });
     }
     // Page scan child — visible without a selection.
@@ -73,15 +81,20 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
   if (!id.startsWith(ITEM_PREFIX)) return;
   const toolId = id.slice(ITEM_PREFIX.length);
+  // Tool input precedence:
+  //   1. linkUrl — set when the user right-clicked a hyperlink. The href is
+  //      the canonical "URL the user is asking about" even if there's a
+  //      selection elsewhere on the page (matches Chrome's own "Open Link"
+  //      semantics).
+  //   2. selectionText — selected text on the page.
+  //   3. empty — should never reach here because Chrome only fires onClicked
+  //      when one of the declared contexts matched, but be defensive.
+  const text = info.linkUrl ?? info.selectionText ?? "";
   // Right-click happens *inside* the frame where the selection lives, which
   // can be an iframe (kone.gg-style embedded body, Notion, etc.). We must
   // route the message to that specific frame; otherwise we'd send it to the
   // top frame which has no idea about the selection.
-  const message = {
-    type: "sincerity:run-tool",
-    toolId,
-    text: info.selectionText ?? "",
-  };
+  const message = { type: "sincerity:run-tool", toolId, text };
   if (info.frameId !== undefined) {
     chrome.tabs.sendMessage(tab.id, message, { frameId: info.frameId });
   } else {

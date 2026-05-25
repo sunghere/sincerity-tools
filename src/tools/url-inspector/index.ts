@@ -30,6 +30,11 @@ export const urlInspectorTool: Tool = {
   id: "url-inspector",
   name: "URL 분석",
   iconSvg: ICON_SVG,
+  // Also offered when the user right-clicks a hyperlink — the background
+  // passes `info.linkUrl` as the tool input and we open the rich popover
+  // against that URL. Other tools (base64/qr) keep the default selection-only
+  // contexts because a link href isn't a meaningful input to them.
+  contexts: ["selection", "link"],
   canHandle(selection) {
     return looksLikeUrl(selection);
   },
