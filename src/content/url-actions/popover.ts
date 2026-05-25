@@ -211,9 +211,11 @@ function buildSafetyRow(provider: "nordvpn" | "rancert", label: string): HTMLDiv
   const wrap = document.createElement("div");
   wrap.className = "url-pop-safety pending";
   wrap.dataset.provider = provider;
+  // CSS spinner instead of an emoji so the loading state actually animates
+  // and looks distinct from "no result yet" emoji placeholders.
   wrap.innerHTML = `
     <div class="url-pop-safety-head">
-      <span class="url-pop-safety-icon">⏳</span>
+      <span class="url-pop-safety-icon"><span class="url-pop-spinner"></span></span>
       <span class="url-pop-safety-provider">${label}</span>
       <span class="url-pop-safety-label">검사 중…</span>
     </div>
@@ -230,10 +232,13 @@ function buildAttribution(): HTMLDivElement {
 
 // --------- async safety checks ---------
 
+type CheckError = "timeout" | "network" | "rate_limit" | "http" | "parse" | "unknown";
+
 interface NordvpnResponse {
   ok: boolean;
   verdict?: "safe" | "malicious" | "unknown";
   detail?: string;
+  error?: CheckError;
 }
 
 interface RancertResponse {
@@ -241,52 +246,77 @@ interface RancertResponse {
   verdict?: "safe" | "malicious" | "unknown";
   summary?: string;
   counts?: { clean: number; unrated: number; suspicious: number; malicious: number; total: number };
+  error?: CheckError;
 }
+
+// Client-side timeout — slightly longer than each background fetch's own
+// timeout so the background's classified error reaches us first. Acts as a
+// last-resort guard against an MV3 service worker eviction that drops our
+// sendMessage promise on the floor (would otherwise spin forever).
+const CLIENT_TIMEOUT_MS = 12_000;
 
 async function runNordvpnCheck(url: string, popover: HTMLDivElement): Promise<void> {
   const section = popover.querySelector<HTMLDivElement>('[data-provider="nordvpn"]');
   if (!section) return;
-  let res: NordvpnResponse | null = null;
+  let res: NordvpnResponse;
   try {
-    res = await sendMessage<NordvpnResponse>({ type: "sincerity:check-url", url });
-  } catch {
-    res = { ok: false };
+    res = await sendMessageWithTimeout<NordvpnResponse>(
+      { type: "sincerity:check-url", url },
+      CLIENT_TIMEOUT_MS
+    );
+  } catch (e) {
+    res = { ok: false, error: e instanceof TimeoutError ? "timeout" : "network" };
   }
   if (popover !== current) return;
-  renderVerdictRow(section, "NordVPN", res?.ok ? res.verdict : undefined, res?.detail);
+  renderProviderRow(section, "NordVPN", res, res.detail);
 }
 
 async function runRancertCheck(url: string, popover: HTMLDivElement): Promise<void> {
   const section = popover.querySelector<HTMLDivElement>('[data-provider="rancert"]');
   if (!section) return;
-  let res: RancertResponse | null = null;
+  let res: RancertResponse;
   try {
-    res = await sendMessage<RancertResponse>({ type: "sincerity:check-url-rancert", url });
-  } catch {
-    res = { ok: false };
+    res = await sendMessageWithTimeout<RancertResponse>(
+      { type: "sincerity:check-url-rancert", url },
+      CLIENT_TIMEOUT_MS
+    );
+  } catch (e) {
+    res = { ok: false, error: e instanceof TimeoutError ? "timeout" : "network" };
   }
   if (popover !== current) return;
-  renderVerdictRow(section, "Rancert", res?.ok ? res.verdict : undefined, res?.summary);
+  renderProviderRow(section, "Rancert", res, res.summary);
 }
 
-function renderVerdictRow(
+interface BasicResponse {
+  ok: boolean;
+  verdict?: "safe" | "malicious" | "unknown";
+  error?: CheckError;
+}
+
+function renderProviderRow(
   section: HTMLDivElement,
   provider: string,
-  verdict: "safe" | "malicious" | "unknown" | undefined,
+  res: BasicResponse,
   detail: string | undefined
 ): void {
-  section.classList.remove("pending");
-  if (verdict === undefined) {
-    section.classList.add("unknown");
+  section.classList.remove("pending", "safe", "danger", "unknown", "error");
+
+  if (!res.ok) {
+    section.classList.add("error");
+    const { label, hint } = labelsForError(res.error);
+    const hintHtml = hint ? `<div class="url-pop-safety-detail">${escapeHtml(hint)}</div>` : "";
     section.innerHTML = `
       <div class="url-pop-safety-head">
-        <span class="url-pop-safety-icon">?</span>
+        <span class="url-pop-safety-icon">!</span>
         <span class="url-pop-safety-provider">${escapeHtml(provider)}</span>
-        <span class="url-pop-safety-label">검사 일시적 불가</span>
+        <span class="url-pop-safety-label">${escapeHtml(label)}</span>
       </div>
+      ${hintHtml}
     `;
     return;
   }
+
+  const verdict = res.verdict ?? "unknown";
   const cls = verdict === "safe" ? "safe" : verdict === "malicious" ? "danger" : "unknown";
   const icon = verdict === "safe" ? "✓" : verdict === "malicious" ? "⚠" : "?";
   const label =
@@ -301,6 +331,56 @@ function renderVerdictRow(
     </div>
     ${detailHtml}
   `;
+}
+
+function labelsForError(error: CheckError | undefined): { label: string; hint?: string } {
+  switch (error) {
+    case "timeout":
+      return { label: "응답 시간 초과", hint: "잠시 후 다시 시도해 주세요." };
+    case "network":
+      return { label: "연결 오류", hint: "네트워크 상태를 확인해 주세요." };
+    case "rate_limit":
+      return { label: "요청 한도 초과", hint: "잠시 후 다시 시도해 주세요." };
+    case "http":
+      return { label: "서버 응답 오류" };
+    case "parse":
+      return { label: "응답 해석 실패" };
+    default:
+      return { label: "검사 일시적 불가" };
+  }
+}
+
+class TimeoutError extends Error {
+  constructor() {
+    super("client-timeout");
+    this.name = "TimeoutError";
+  }
+}
+
+function sendMessageWithTimeout<T>(msg: unknown, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new TimeoutError());
+    }, ms);
+    try {
+      chrome.runtime.sendMessage(msg, (response: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        const err = chrome.runtime.lastError;
+        if (err) reject(new Error(err.message));
+        else resolve(response as T);
+      });
+    } catch (e) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(e instanceof Error ? e : new Error(String(e)));
+    }
+  });
 }
 
 // --------- helpers ---------

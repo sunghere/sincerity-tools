@@ -152,19 +152,33 @@ function friendlyTitle(url: string): string {
   }
 }
 
+/**
+ * Machine-readable failure reasons so the content-script popover can show a
+ * specific message (network vs timeout vs rate-limit etc) instead of one
+ * generic "검사 불가". `unknown` is the catch-all when we genuinely don't
+ * know what went wrong.
+ */
+export type CheckError =
+  | "timeout"        // AbortController fired
+  | "network"        // fetch() rejected (DNS, offline, TLS, etc.)
+  | "rate_limit"     // HTTP 429
+  | "http"           // any other non-2xx
+  | "parse"          // 2xx but body didn't shape into a verdict
+  | "unknown";
+
 interface SafetyResponse {
   ok: boolean;
   verdict?: "safe" | "malicious" | "unknown";
   detail?: string;
+  error?: CheckError;
 }
 
 const NORD_ENDPOINT = "https://link-checker.nordvpn.com/v1/public-url-checker/check-url";
+const NORD_TIMEOUT_MS = 6000;
 
 async function handleCheckUrl(url: string): Promise<SafetyResponse> {
-  // Defensive timeout — the public endpoint is fast in practice but we
-  // shouldn't leave the popover hanging if it doesn't respond.
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
+  const timer = setTimeout(() => controller.abort(), NORD_TIMEOUT_MS);
   try {
     const res = await fetch(NORD_ENDPOINT, {
       method: "POST",
@@ -172,14 +186,28 @@ async function handleCheckUrl(url: string): Promise<SafetyResponse> {
       body: JSON.stringify({ url }),
       signal: controller.signal,
     });
-    if (!res.ok) return { ok: false };
-    const json = (await res.json()) as Record<string, unknown>;
+    if (res.status === 429) return { ok: false, error: "rate_limit" };
+    if (!res.ok) return { ok: false, error: "http" };
+    let json: Record<string, unknown>;
+    try {
+      json = (await res.json()) as Record<string, unknown>;
+    } catch {
+      return { ok: false, error: "parse" };
+    }
     return { ok: true, ...normalizeVerdict(json) };
-  } catch {
-    return { ok: false };
+  } catch (e) {
+    return { ok: false, error: classifyFetchError(e) };
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timer);
   }
+}
+
+function classifyFetchError(e: unknown): CheckError {
+  if (e instanceof Error) {
+    if (e.name === "AbortError") return "timeout";
+    if (e.name === "TypeError") return "network"; // fetch's generic offline/CORS/DNS
+  }
+  return "unknown";
 }
 
 /**
@@ -233,11 +261,14 @@ interface RancertResponse {
   summary?: string;
   /** Per-bucket engine counts; useful for the popover detail line. */
   counts?: { clean: number; unrated: number; suspicious: number; malicious: number; total: number };
+  error?: CheckError;
 }
+
+const RANCERT_TIMEOUT_MS = 8000;
 
 async function handleCheckUrlRancert(url: string): Promise<RancertResponse> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  const timer = setTimeout(() => controller.abort(), RANCERT_TIMEOUT_MS);
   try {
     const body = `p=u&strUrl=${encodeURIComponent(url)}`;
     const res = await fetch(RANCERT_ENDPOINT, {
@@ -251,13 +282,14 @@ async function handleCheckUrlRancert(url: string): Promise<RancertResponse> {
       body,
       signal: controller.signal,
     });
-    if (!res.ok) return { ok: false };
+    if (res.status === 429) return { ok: false, error: "rate_limit" };
+    if (!res.ok) return { ok: false, error: "http" };
     const html = await res.text();
     return parseRancertHtml(html);
-  } catch {
-    return { ok: false };
+  } catch (e) {
+    return { ok: false, error: classifyFetchError(e) };
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(timer);
   }
 }
 
@@ -281,8 +313,11 @@ function parseRancertHtml(html: string): RancertResponse {
     }
   }
   if (counts.total === 0) {
-    // Server returned a non-result page (rate-limited, invalid input, etc.).
-    return { ok: false };
+    // Server returned a non-result page — typically the rate-limit landing
+    // page (no 429 status, just plain HTML without the table). Surface as
+    // a parse failure so the popover can hint at "응답 해석 실패" — and
+    // pre-emptively map the most common cause for the user.
+    return { ok: false, error: "parse" };
   }
 
   // Any malicious engine wins — even one phishing flag is worth surfacing.

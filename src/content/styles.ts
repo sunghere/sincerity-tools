@@ -480,13 +480,33 @@ export const STYLES = `
     color: #8a8a93;
     font-size: 10.5px;
   }
-  .url-pop-safety.pending .url-pop-safety-icon { background: #2c2c33; color: #b9b9c2; }
+  .url-pop-safety.pending .url-pop-safety-icon { background: #2c2c33; }
+  .url-pop-safety.pending .url-pop-safety-label { color: #b9b9c2; }
   .url-pop-safety.safe .url-pop-safety-icon { background: #1f3320; color: #7ad17a; }
   .url-pop-safety.safe .url-pop-safety-label { color: #7ad17a; }
   .url-pop-safety.danger .url-pop-safety-icon { background: #3f1d1d; color: #ff9c9c; }
   .url-pop-safety.danger .url-pop-safety-label { color: #ff9c9c; }
   .url-pop-safety.unknown .url-pop-safety-icon { background: #3f3214; color: #facc15; }
   .url-pop-safety.unknown .url-pop-safety-label { color: #facc15; }
+  /* "error" state is for transport/parse failures — visually distinct from
+     "unknown" (which is the *provider's* verdict). Muted gray-blue so users
+     don't read it as "the URL is dangerous". */
+  .url-pop-safety.error .url-pop-safety-icon { background: #2c2c38; color: #9aa3b2; }
+  .url-pop-safety.error .url-pop-safety-label { color: #b9b9c2; }
+  .url-pop-safety.error .url-pop-safety-detail { color: #8a8a93; }
+
+  .url-pop-spinner {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    border: 1.5px solid #4a4a52;
+    border-top-color: #d4d4d8;
+    border-radius: 50%;
+    animation: url-pop-spin 700ms linear infinite;
+  }
+  @keyframes url-pop-spin {
+    to { transform: rotate(360deg); }
+  }
 
   .url-pop-attrib {
     padding: 6px 12px;
